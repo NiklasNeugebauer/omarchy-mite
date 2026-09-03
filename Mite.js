@@ -18,6 +18,8 @@ function request(cfg, method, path, body, callback) {
   }
   var xhr = new XMLHttpRequest()
   xhr.open(method, baseUrl(cfg) + path)
+  xhr.timeout = 10000
+  xhr.ontimeout = function() { callback("mite did not answer within 10s", null) }
   xhr.setRequestHeader("X-MiteApiKey", cfg.apiKey)
   xhr.setRequestHeader("Accept", "application/json")
   if (body !== null) xhr.setRequestHeader("Content-Type", "application/json")
