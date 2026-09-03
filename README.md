@@ -19,9 +19,8 @@ git clone https://github.com/NiklasNeugebauer/omarchy-mite \
 
 Add the widget to your bar (`omarchy plugin enable niklasneugebauer.mite`) and
 open the panel — while unconfigured it opens straight into its settings:
-account (the subdomain of `https://<account>.mite.de`), API key (mite →
-Account → "mite API key"), and the default project the form snaps back to
-after each booking. Settings are stored on the widget's entry in
+account (the subdomain of `https://<account>.mite.de`) and API key (mite →
+Account → "mite API key"). Settings are stored on the widget's entry in
 `~/.config/omarchy/shell.json`, which is equally fine to edit by hand (the
 shell hot-reloads on save):
 
@@ -29,8 +28,7 @@ shell hot-reloads on save):
 {
   "id": "niklasneugebauer.mite",
   "account": "your-account",
-  "apiKey": "your-mite-api-key",
-  "defaultProject": "Meetings"
+  "apiKey": "your-mite-api-key"
 }
 ```
 
@@ -58,9 +56,9 @@ walks time → project → service → note, `Enter` books from anywhere.
   finds "Website Relaunch"), the top match is preselected, `Down`/`Up` pick,
   `Tab` accepts and moves on. With a choice pending, `Enter` only selects —
   another `Enter` books. Free text that matches nothing never books.
-- After booking, the project snaps back to `defaultProject` (matched
-  fuzzily, so code suffixes in project names don't matter), the service
-  stays — also across restarts — time and note clear.
+- Every booking needs a project, picked deliberately: after booking, the
+  project clears. The service stays — also across restarts — time and note
+  clear.
 - Click an entry in the timeline (or `Ctrl+E` on a selected one) to load it
   into the form; `Enter` saves the changes, `Esc` cancels. An empty time
   field keeps the entry's original timing.

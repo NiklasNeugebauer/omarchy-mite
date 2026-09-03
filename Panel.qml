@@ -24,7 +24,6 @@ Panel {
     apiKey: String(setting("apiKey", "")),
   })
   readonly property bool configured: miteConfig.account !== "" && miteConfig.apiKey !== ""
-  readonly property string defaultProjectName: String(setting("defaultProject", ""))
   readonly property int refreshMinutes: Math.max(1, parseInt(setting("refreshMinutes", 1), 10) || 1)
 
   // ---- Clock. nowMinutes drives the red state, the tracker slot, and the
@@ -129,7 +128,6 @@ Panel {
     Mite.fetchProjects(root.miteConfig, function(err, list) {
       if (err) { root.error = err; return }
       root.projects = list
-      if (!projectField.selected) projectField.selected = root.findDefaultProject()
     })
     Mite.fetchServices(root.miteConfig, function(err, list) {
       if (err) { root.error = err; return }
@@ -140,18 +138,6 @@ Panel {
           if (list[i].id === last) serviceField.selected = list[i]
       }
     })
-  }
-
-  // Exact name match first; otherwise the best fuzzy hit, because mite
-  // project names often carry code suffixes ("Meetings (12345)") that nobody
-  // wants to spell out in a setting.
-  function findDefaultProject() {
-    var wanted = root.defaultProjectName.toLowerCase()
-    if (wanted === "") return null
-    for (var i = 0; i < root.projects.length; i++)
-      if (String(root.projects[i].name).toLowerCase() === wanted) return root.projects[i]
-    var hits = Model.fuzzyFilter(root.projects, root.defaultProjectName, function(p) { return p.name })
-    return hits.length > 0 ? hits[0] : null
   }
 
   function moveDay(delta) {
@@ -199,9 +185,8 @@ Panel {
     timeField.text = ""
     noteField.text = ""
     projectField.text = ""
+    projectField.selected = null
     serviceField.text = ""
-    var fallback = root.findDefaultProject()
-    if (fallback) projectField.selected = fallback
     timeField.forceActiveFocus()
   }
 
@@ -211,6 +196,7 @@ Panel {
   function resolvePickers() {
     var project = projectField.resolved()
     if (projectField.text !== "" && !project) { root.error = "No project matches \"" + projectField.text + "\""; return null }
+    if (!project) { root.error = "Pick a project"; return null }
     var service = serviceField.resolved()
     if (serviceField.text !== "" && !service) { root.error = "No service matches \"" + serviceField.text + "\""; return null }
     if (project) { projectField.selected = project; projectField.text = "" }
@@ -311,10 +297,11 @@ Panel {
       persistSettings({ lastServiceId: serviceField.selected.id })
     timeField.text = ""
     noteField.text = ""
+    // Every booking names its project deliberately; only the service is
+    // sticky.
     projectField.text = ""
+    projectField.selected = null
     serviceField.text = ""
-    var fallback = root.findDefaultProject()
-    if (fallback) projectField.selected = fallback
     timeField.forceActiveFocus()
     refreshView()
     refreshToday()
@@ -368,7 +355,6 @@ Panel {
   function openSettings() {
     settingsAccount.text = root.miteConfig.account
     settingsApiKey.text = root.miteConfig.apiKey
-    settingsProject.text = root.defaultProjectName
     root.settingsOpen = true
     Qt.callLater(function() { settingsAccount.forceActiveFocus(); settingsAccount.selectAll() })
   }
@@ -377,7 +363,6 @@ Panel {
     persistSettings({
       account: settingsAccount.text.trim(),
       apiKey: settingsApiKey.text.trim(),
-      defaultProject: settingsProject.text.trim(),
     })
     root.settingsOpen = false
     root.error = ""
@@ -736,7 +721,7 @@ Panel {
           font.pixelSize: Style.font.body
           placeholderText: "account"
           Keys.priority: Keys.BeforeItem
-          Keys.onPressed: function(event) { root.handleSettingsKey(event, settingsApiKey, settingsProject) }
+          Keys.onPressed: function(event) { root.handleSettingsKey(event, settingsApiKey, settingsApiKey) }
         }
 
         SettingsLabel { text: "API KEY — mite → Account" }
@@ -751,21 +736,7 @@ Panel {
           password: true
           placeholderText: "api key"
           Keys.priority: Keys.BeforeItem
-          Keys.onPressed: function(event) { root.handleSettingsKey(event, settingsProject, settingsAccount) }
-        }
-
-        SettingsLabel { text: "DEFAULT PROJECT — after each booking" }
-
-        TextField {
-          id: settingsProject
-          width: parent.width
-          foreground: root.fg
-          accent: Color.accent
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-          placeholderText: "project name, or empty"
-          Keys.priority: Keys.BeforeItem
-          Keys.onPressed: function(event) { root.handleSettingsKey(event, settingsAccount, settingsApiKey) }
+          Keys.onPressed: function(event) { root.handleSettingsKey(event, settingsAccount, settingsAccount) }
         }
 
         SettingsLabel { text: "Enter saves · Esc " + (root.configured ? "cancels" : "closes") }
