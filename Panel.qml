@@ -205,51 +205,75 @@ Panel {
     timeField.forceActiveFocus()
   }
 
+  // Booking straight from another field skips accept(); keep the pickers'
+  // selections in step with what actually books. Returns null (with the
+  // error set) when a typed query matches nothing.
+  function resolvePickers() {
+    var project = projectField.resolved()
+    if (projectField.text !== "" && !project) { root.error = "No project matches \"" + projectField.text + "\""; return null }
+    var service = serviceField.resolved()
+    if (serviceField.text !== "" && !service) { root.error = "No service matches \"" + serviceField.text + "\""; return null }
+    if (project) { projectField.selected = project; projectField.text = "" }
+    if (service) { serviceField.selected = service; serviceField.text = "" }
+    return { project: project, service: service }
+  }
+
   function commit() {
     if (!root.configured || root.busy) return
     var time = Model.parseTimeInput(timeField.text, root.nowMinutes)
-    if (!time) { root.error = "Time: \"930 1215\", \"930\", or empty to start the tracker"; return }
-    var project = projectField.resolved()
-    if (projectField.text !== "" && !project) { root.error = "No project matches \"" + projectField.text + "\""; return }
-    var service = serviceField.resolved()
-    if (serviceField.text !== "" && !service) { root.error = "No service matches \"" + serviceField.text + "\""; return }
-    // Booking straight from another field skips accept(); keep the pickers'
-    // selections in step with what actually books.
-    if (project) { projectField.selected = project; projectField.text = "" }
-    if (service) { serviceField.selected = service; serviceField.text = "" }
+    if (!time) { root.error = "Time: \"930 1215\" or \"930\" (until now)"; return }
+    var picked = resolvePickers()
+    if (!picked) return
     var note = noteField.text.trim()
-    if (root.editingId !== 0) { commitEdit(time, project, service, note); return }
+    if (root.editingId !== 0) { commitEdit(time, picked.project, picked.service, note); return }
+    if (time.mode === "track") { root.error = "No time given — Ctrl+Enter runs the tracker"; return }
     var entry = {
       date_at: root.viewKey,
-      project_id: project ? project.id : null,
-      service_id: service ? service.id : null,
+      project_id: picked.project ? picked.project.id : null,
+      service_id: picked.service ? picked.service.id : null,
+      minutes: time.end - time.start,
+      note: Model.composeNote(time.start, time.end, note),
     }
-    if (time.mode === "track") {
-      if (!root.viewingToday) { root.error = "The tracker only runs on today"; return }
-      entry.minutes = 0
-      entry.note = note
-      root.busy = true
-      root.stopRunningTracker(function(err) {
-        if (err) { root.busy = false; root.error = err; return }
-        Mite.createEntry(root.miteConfig, entry, function(err2, created) {
-          if (err2) { root.busy = false; root.error = err2; return }
-          Mite.startTracker(root.miteConfig, created.id, function(err3) {
-            root.busy = false
-            if (err3) { root.error = err3; return }
-            root.afterCommit()
-          })
+    root.busy = true
+    Mite.createEntry(root.miteConfig, entry, function(err, created) {
+      root.busy = false
+      if (err) { root.error = err; return }
+      root.afterCommit()
+    })
+  }
+
+  // Ctrl+Enter, anywhere: the tracker as a toggle — start on the form's
+  // project/service/note when idle, stop (writing the note prefix) when
+  // running.
+  function toggleTracker() {
+    if (root.trackingEntry) stopTracking()
+    else startTrackerNow()
+  }
+
+  function startTrackerNow() {
+    if (!root.configured || root.busy) return
+    if (!root.viewingToday) { root.error = "The tracker only runs on today"; return }
+    var picked = resolvePickers()
+    if (!picked) return
+    var entry = {
+      date_at: root.todayKey,
+      project_id: picked.project ? picked.project.id : null,
+      service_id: picked.service ? picked.service.id : null,
+      minutes: 0,
+      note: noteField.text.trim(),
+    }
+    root.busy = true
+    root.stopRunningTracker(function(err) {
+      if (err) { root.busy = false; root.error = err; return }
+      Mite.createEntry(root.miteConfig, entry, function(err2, created) {
+        if (err2) { root.busy = false; root.error = err2; return }
+        Mite.startTracker(root.miteConfig, created.id, function(err3) {
+          root.busy = false
+          if (err3) { root.error = err3; return }
+          root.afterCommit()
         })
       })
-    } else {
-      entry.minutes = time.end - time.start
-      entry.note = Model.composeNote(time.start, time.end, note)
-      root.busy = true
-      Mite.createEntry(root.miteConfig, entry, function(err, created) {
-        root.busy = false
-        if (err) { root.error = err; return }
-        root.afterCommit()
-      })
-    }
+    })
   }
 
   // Empty time keeps the entry's original timing (or lack of one); typed
@@ -428,7 +452,7 @@ Panel {
     if (ctrl && event.key === Qt.Key_D) { root.requestDelete(); return true }
     if (ctrl && event.key === Qt.Key_R) { root.refreshView(); root.refreshCatalogs(true); return true }
     if (ctrl && event.key === Qt.Key_Comma) { root.openSettings(); return true }
-    if (ctrl && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) { root.stopTracking(); return true }
+    if (ctrl && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) { root.toggleTracker(); return true }
     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.commit(); return true }
     return false
   }
@@ -549,9 +573,11 @@ Panel {
         if (previousField) previousField.forceActiveFocus()
         event.accepted = true; return
       }
-      if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-        // The highlighted match books; keep it selected for next time.
+      if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && choice()) {
+        // A pending choice makes Enter a selection, nothing more — booking
+        // takes another Enter, and the tracker only ever runs on Ctrl+Enter.
         accept()
+        event.accepted = true; return
       }
       event.accepted = root.handleGlobalKey(event)
     }
@@ -797,7 +823,7 @@ Panel {
         accent: Color.accent
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
-        placeholderText: "note — Enter books" + (root.viewingToday ? ", empty time starts the tracker" : "")
+        placeholderText: "note — Enter books · Ctrl+Enter tracker"
 
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
@@ -998,7 +1024,7 @@ Panel {
           textFormat: Text.PlainText
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "Ctrl: ←/→ day · ↓/↑ select · E edit · D delete ×2"
+          text: "Ctrl: ←/→ day · ↓/↑ select · E edit · D del ×2 · ⏎ tracker"
           color: Qt.darker(root.fg, 1.9)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

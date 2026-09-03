@@ -48,15 +48,16 @@ o.bind("SUPER + CTRL + M", "mite", "omarchy-shell shell toggle niklasneugebauer.
 The form is built for speed: it opens focused on the **time field**, `Tab`
 walks time → project → service → note, `Enter` books from anywhere.
 
-- Time field, bare digits, no colons:
-  - `930 1215` — completed entry 9:30–12:15 (also `930-1215`)
-  - `930` — entry from 9:30 until now
-  - *empty* — start the mite tracker now (stop it later with `Ctrl+Enter`;
-    the stop writes the `(start bis end)` prefix into the note)
+- Time field, bare digits, no colons: `930 1215` books 9:30–12:15 (also
+  `930-1215`), `930` books from 9:30 until now.
+- `Ctrl+Enter` toggles the mite tracker: it starts on the form's current
+  project/service/note, and stopping writes the `(start bis end)` prefix
+  into the note. Enter never starts a timer.
 - Project and service are autocomplete comboboxes: the field shows the
   current selection, focusing drops the list, typing fuzzy-filters it (`wr`
   finds "Website Relaunch"), the top match is preselected, `Down`/`Up` pick,
-  `Tab` accepts and moves on. Free text that matches nothing never books.
+  `Tab` accepts and moves on. With a choice pending, `Enter` only selects —
+  another `Enter` books. Free text that matches nothing never books.
 - After booking, the project snaps back to `defaultProject` (matched
   fuzzily, so code suffixes in project names don't matter), the service
   stays — also across restarts — time and note clear.
@@ -76,7 +77,7 @@ the last timed entry, dimmed. Chords work from any field:
 | `Ctrl+Down` / `Ctrl+Up` | select an entry in the timeline |
 | `Ctrl+E` | edit the selected entry |
 | `Ctrl+D` | delete the selected entry (twice to confirm) |
-| `Ctrl+Enter` | stop the running tracker |
+| `Ctrl+Enter` | start/stop the tracker |
 | `Ctrl+R` | reload day, projects, and services |
 | `Ctrl+,` | settings (also the ⚙ bottom right) |
 | `Esc` | clear query / edit / selection, then close |
