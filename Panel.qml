@@ -45,7 +45,11 @@ Panel {
   property string error: ""
   property bool busy: false
 
-  readonly property var dayLayout: Model.layoutDay(viewEntries, nowMinutes)
+  // The time span a minimum-height block covers on screen, so the layout can
+  // split lanes for entries that collide only visually.
+  readonly property real pxPerMinute: Style.spaceReal(36) / 60
+  readonly property int minSlotMinutes: Math.ceil(Style.space(14) / pxPerMinute)
+  readonly property var dayLayout: Model.layoutDay(viewEntries, nowMinutes, minSlotMinutes)
   readonly property bool activeNow: Model.isActive(todayEntries, nowMinutes)
   readonly property int todayTotal: Model.totalMinutes(todayEntries)
   readonly property var trackingEntry: {
@@ -130,15 +134,24 @@ Panel {
     Mite.fetchServices(root.miteConfig, function(err, list) {
       if (err) { root.error = err; return }
       root.services = list
+      if (!serviceField.selected) {
+        var last = Number(setting("lastServiceId", 0))
+        for (var i = 0; i < list.length; i++)
+          if (list[i].id === last) serviceField.selected = list[i]
+      }
     })
   }
 
+  // Exact name match first; otherwise the best fuzzy hit, because mite
+  // project names often carry code suffixes ("Meetings (12345)") that nobody
+  // wants to spell out in a setting.
   function findDefaultProject() {
     var wanted = root.defaultProjectName.toLowerCase()
     if (wanted === "") return null
     for (var i = 0; i < root.projects.length; i++)
       if (String(root.projects[i].name).toLowerCase() === wanted) return root.projects[i]
-    return null
+    var hits = Model.fuzzyFilter(root.projects, root.defaultProjectName, function(p) { return p.name })
+    return hits.length > 0 ? hits[0] : null
   }
 
   function moveDay(delta) {
@@ -200,6 +213,10 @@ Panel {
     if (projectField.text !== "" && !project) { root.error = "No project matches \"" + projectField.text + "\""; return }
     var service = serviceField.resolved()
     if (serviceField.text !== "" && !service) { root.error = "No service matches \"" + serviceField.text + "\""; return }
+    // Booking straight from another field skips accept(); keep the pickers'
+    // selections in step with what actually books.
+    if (project) { projectField.selected = project; projectField.text = "" }
+    if (service) { serviceField.selected = service; serviceField.text = "" }
     var note = noteField.text.trim()
     if (root.editingId !== 0) { commitEdit(time, project, service, note); return }
     var entry = {
@@ -264,6 +281,10 @@ Panel {
   function afterCommit() {
     root.error = ""
     root.editingId = 0
+    // The service survives restarts: the next booking is usually the same
+    // kind of work.
+    if (serviceField.selected && serviceField.selected.id !== Number(setting("lastServiceId", 0)))
+      persistSettings({ lastServiceId: serviceField.selected.id })
     timeField.text = ""
     noteField.text = ""
     projectField.text = ""
@@ -797,11 +818,13 @@ Panel {
       }
 
       // ---- Tracker line, only while one runs.
-      Row {
+      Item {
         visible: root.trackingEntry !== null && !root.settingsOpen
-        spacing: Style.space(8)
+        width: parent.width
+        height: trackerText.implicitHeight
 
         Rectangle {
+          id: trackerDot
           width: Style.space(8)
           height: width
           radius: width / 2
@@ -810,7 +833,12 @@ Panel {
         }
 
         Text {
+          id: trackerText
+          anchors.left: trackerDot.right
+          anchors.leftMargin: Style.space(8)
+          anchors.right: parent.right
           textFormat: Text.PlainText
+          elide: Text.ElideRight
           text: root.trackingEntry
             ? "tracking " + (root.trackingEntry.project_name || "—") + " since " + root.trackingSince() + "  ·  Ctrl+Enter stops"
             : ""
@@ -841,7 +869,7 @@ Panel {
         visible: !root.settingsOpen
         readonly property int fromMinutes: root.dayLayout.fromMinutes
         readonly property int toMinutes: root.dayLayout.toMinutes
-        readonly property real pxPerMinute: Style.spaceReal(36) / 60
+        readonly property real pxPerMinute: root.pxPerMinute
         readonly property int labelGutter: Style.space(38)
         width: parent.width
         height: (toMinutes - fromMinutes) * pxPerMinute
@@ -905,7 +933,7 @@ Panel {
             x: timeline.labelGutter + modelData.column * laneWidth
             y: timeline.yFor(modelData.start)
             width: laneWidth - (modelData.columns > 1 ? Style.space(2) : 0)
-            height: Math.max(Style.space(14), (modelData.end - modelData.start) * timeline.pxPerMinute - 1)
+            height: (modelData.visualEnd - modelData.start) * timeline.pxPerMinute - 1
             radius: Style.cornerRadius
             opacity: modelData.timed ? 1 : 0.55
             color: deleting
@@ -970,7 +998,7 @@ Panel {
           textFormat: Text.PlainText
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "Ctrl+←/→ day · Ctrl+↓/↑ select · Ctrl+D delete ×2"
+          text: "Ctrl: ←/→ day · ↓/↑ select · E edit · D delete ×2"
           color: Qt.darker(root.fg, 1.9)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

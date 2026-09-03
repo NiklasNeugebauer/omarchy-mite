@@ -57,8 +57,9 @@ walks time → project → service → note, `Enter` books from anywhere.
   current selection, focusing drops the list, typing fuzzy-filters it (`wr`
   finds "Website Relaunch"), the top match is preselected, `Down`/`Up` pick,
   `Tab` accepts and moves on. Free text that matches nothing never books.
-- After booking, the project snaps back to `defaultProject`, the service
-  stays, time and note clear.
+- After booking, the project snaps back to `defaultProject` (matched
+  fuzzily, so code suffixes in project names don't matter), the service
+  stays — also across restarts — time and note clear.
 - Click an entry in the timeline (or `Ctrl+E` on a selected one) to load it
   into the form; `Enter` saves the changes, `Esc` cancels. An empty time
   field keeps the entry's original timing.

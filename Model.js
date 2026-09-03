@@ -143,6 +143,9 @@ var DEFAULT_TO_HOUR = 18
 /**
  * Overlapping slots share the group's width; each takes the first column
  * free at its start. `columns` is the width of the whole overlap group.
+ * Columns are assigned on visualEnd, not end: a rendered block never gets
+ * shorter than the minimum readable height, so two short entries can collide
+ * on screen without overlapping in time — they must split lanes too.
  */
 function assignColumns(slots) {
   var group = []
@@ -157,13 +160,13 @@ function assignColumns(slots) {
     if (slot.start >= groupEnd) { closeGroup(); group = []; groupEnd = -1 }
     var ends = []
     for (var g = 0; g < group.length; g++)
-      ends[group[g].column] = Math.max(ends[group[g].column] || 0, group[g].end)
+      ends[group[g].column] = Math.max(ends[group[g].column] || 0, group[g].visualEnd)
     var column = -1
     for (var c = 0; c < ends.length; c++) if (ends[c] <= slot.start) { column = c; break }
     if (column === -1) column = ends.length
     slot.column = column
     group.push(slot)
-    groupEnd = Math.max(groupEnd, slot.end)
+    groupEnd = Math.max(groupEnd, slot.visualEnd)
   }
   closeGroup()
   return slots
@@ -173,11 +176,15 @@ function assignColumns(slots) {
  * @param entries  raw mite time entries of one day ({id, minutes, note,
  *   project_name, service_name, tracking?: {since}}).
  * @param nowMinutes  minutes from midnight, for the running tracker slot.
+ * @param minSlotMinutes  the time span a minimum-height block covers on
+ *   screen; lanes split on it so short entries stay legible side by side.
  * @returns {{slots: Array, fromMinutes: number, toMinutes: number}}
- *   Slots carry: id, start, end, label, project, service, minutes, timed,
- *   tracking, overlap, column, columns, mismatch (duration ≠ prefix span).
+ *   Slots carry: id, start, end, visualEnd, label, project, service,
+ *   minutes, timed, tracking, overlap, column, columns, mismatch
+ *   (duration ≠ prefix span).
  */
-function layoutDay(entries, nowMinutes) {
+function layoutDay(entries, nowMinutes, minSlotMinutes) {
+  var minSpan = Math.max(0, minSlotMinutes || 0)
   var timed = []
   var untimed = []
   for (var i = 0; i < entries.length; i++) {
@@ -220,15 +227,17 @@ function layoutDay(entries, nowMinutes) {
     for (var b = 0; b < timed.length; b++)
       if (a !== b && timed[b].start < timed[a].end && timed[a].start < timed[b].end)
         timed[a].overlap = true
+  for (var v = 0; v < timed.length; v++)
+    timed[v].visualEnd = Math.max(timed[v].end, timed[v].start + minSpan)
   assignColumns(timed)
 
   // Untimed entries hang after the last timed one, back to back.
-  var cursor = timed.length
-    ? timed[timed.length - 1].end
-    : DEFAULT_FROM_HOUR * 60
+  var cursor = DEFAULT_FROM_HOUR * 60
+  for (var t = 0; t < timed.length; t++) cursor = Math.max(cursor, timed[t].visualEnd)
   for (var u = 0; u < untimed.length; u++) {
     untimed[u].start = cursor
-    untimed[u].end = cursor + Math.max(untimed[u].minutes, 5)
+    untimed[u].end = cursor + Math.max(untimed[u].minutes, minSpan, 5)
+    untimed[u].visualEnd = untimed[u].end
     cursor = untimed[u].end
   }
 
@@ -237,7 +246,7 @@ function layoutDay(entries, nowMinutes) {
   var to = DEFAULT_TO_HOUR * 60
   for (var s = 0; s < slots.length; s++) {
     from = Math.min(from, Math.floor(slots[s].start / 60) * 60)
-    to = Math.max(to, Math.ceil(slots[s].end / 60) * 60)
+    to = Math.max(to, Math.ceil(slots[s].visualEnd / 60) * 60)
   }
   return { slots: slots, fromMinutes: from, toMinutes: to }
 }

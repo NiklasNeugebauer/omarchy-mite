@@ -84,6 +84,19 @@ test("layoutDay tracker slot runs until now", () => {
   assert.ok(slots[0].tracking)
 })
 
+test("layoutDay splits lanes for blocks that collide only on screen", () => {
+  const entries = [
+    { id: 1, minutes: 2, note: "(10:53 bis 10:55) stop" },
+    { id: 2, minutes: 3, note: "(10:57 bis 11:00) next" },
+  ]
+  const plain = M.layoutDay(entries, 12 * 60)
+  assert.equal(plain.slots[0].columns, 1, "no time overlap, no min span, one lane")
+  const { slots } = M.layoutDay(entries, 12 * 60, 24)
+  assert.notEqual(slots[0].column, slots[1].column, "24-minute blocks collide on screen")
+  assert.equal(slots[0].columns, 2)
+  assert.ok(!slots[0].overlap, "a screen collision is not a booking overlap")
+})
+
 test("layoutDay grows the axis", () => {
   const { fromMinutes, toMinutes } = M.layoutDay(
     [{ id: 1, minutes: 60, note: "(6:30 bis 20:30)" }], 0)
