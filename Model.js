@@ -89,8 +89,8 @@ function ensurePrefix(note, start, end) {
 }
 
 // ---- Fuzzy matching for the project/service pickers. Subsequence match;
-//      earlier and word-initial hits score higher, so "om" finds
-//      "Office Meetings" before "Homepage".
+//      earlier and word-initial hits score higher, so "wr" finds
+//      "Website Relaunch" before "Lowrider".
 
 /** @returns {number} score, or -1 when query is not a subsequence of text. */
 function fuzzyScore(query, text) {

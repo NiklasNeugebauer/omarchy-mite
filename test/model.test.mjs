@@ -43,12 +43,12 @@ test("note prefix round-trip", () => {
 })
 
 test("fuzzy", () => {
-  assert.ok(M.fuzzyScore("om", "Office Meetings") > M.fuzzyScore("om", "Homepage"))
-  assert.equal(M.fuzzyScore("xyz", "Office Meetings"), -1)
+  assert.ok(M.fuzzyScore("wr", "Website Relaunch") > M.fuzzyScore("wr", "Lowrider"))
+  assert.equal(M.fuzzyScore("xyz", "Website Relaunch"), -1)
   assert.equal(M.fuzzyScore("", "anything"), 0)
-  const items = [{ name: "Homepage" }, { name: "Office Meetings" }, { name: "Ops" }]
+  const items = [{ name: "Homepage" }, { name: "Order Portal" }, { name: "Ops" }]
   const hits = M.fuzzyFilter(items, "o", (p) => p.name)
-  assert.equal(hits[0].name, "Office Meetings")
+  assert.equal(hits[0].name, "Order Portal")
   assert.deepEqual(M.fuzzyFilter(items, "", (p) => p.name), items, "empty query keeps order")
 })
 

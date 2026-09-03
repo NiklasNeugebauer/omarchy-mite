@@ -39,7 +39,7 @@ For keyboard-only access, bind the panel toggle in
 `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("SUPER, T", "exec", "omarchy-shell niklasneugebauer.mite toggle")
+o.bind("SUPER + CTRL + M", "mite", "omarchy-shell shell toggle niklasneugebauer.mite")
 ```
 
 ## Use
@@ -52,17 +52,26 @@ walks time → project → service → note, `Enter` books from anywhere.
   - `930` — entry from 9:30 until now
   - *empty* — start the mite tracker now (stop it later with `Ctrl+Enter`;
     the stop writes the `(start bis end)` prefix into the note)
-- Project and service pickers filter fuzzily while you type (`om` finds
-  "Office Meetings"); `Up`/`Down` pick, the top match is preselected.
+- Project and service pickers filter fuzzily while you type (`wr` finds
+  "Website Relaunch"); the top match is preselected, `Down`/`Up` pick,
+  `Tab` accepts and moves on. The placeholder shows the current selection.
 - After booking, the project snaps back to `defaultProject`, the service
   stays, time and note clear.
 
 Below the form, the day timeline (8–18 h, growing with the entries):
 overlapping entries stand side by side in red; entries whose duration does
 not match their prefix are flagged; entries without a time prefix hang below
-the last timed entry in a muted tone. `Ctrl+Left`/`Ctrl+Right` (or the
-chevrons) move between days, `t` returns to today, `Ctrl+Down`/`Ctrl+Up`
-select an entry, `Delete` removes it (press twice to confirm), `Esc` closes.
+the last timed entry, dimmed. Chords work from any field:
+
+| Chord | Action |
+|---|---|
+| `Ctrl+Left` / `Ctrl+Right` | previous / next day (chevrons do the same) |
+| `Ctrl+T` | back to today |
+| `Ctrl+Down` / `Ctrl+Up` | select an entry in the timeline |
+| `Ctrl+D` | delete the selected entry (twice to confirm) |
+| `Ctrl+Enter` | stop the running tracker |
+| `Ctrl+R` | reload day, projects, and services |
+| `Esc` | clear selection, then close |
 
 The bar widget polls mite once a minute. Red glyph: no tracker running and no
 entry prefix covering now. While the tracker runs, the label shows the
