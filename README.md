@@ -17,8 +17,13 @@ git clone https://github.com/NiklasNeugebauer/omarchy-mite \
   ~/.config/omarchy/plugins/niklasneugebauer.mite
 ```
 
-Add the widget to your bar and configure it in `~/.config/omarchy/shell.json`
-(the shell hot-reloads on save):
+Add the widget to your bar (`omarchy plugin enable niklasneugebauer.mite`) and
+open the panel — while unconfigured it opens straight into its settings:
+account (the subdomain of `https://<account>.mite.de`), API key (mite →
+Account → "mite API key"), and the default project the form snaps back to
+after each booking. Settings are stored on the widget's entry in
+`~/.config/omarchy/shell.json`, which is equally fine to edit by hand (the
+shell hot-reloads on save):
 
 ```json
 {
@@ -29,11 +34,7 @@ Add the widget to your bar and configure it in `~/.config/omarchy/shell.json`
 }
 ```
 
-- **account** — the subdomain of `https://<account>.mite.de`.
-- **apiKey** — mite → Account → "mite API key". Stays in shell.json; treat that
-  file accordingly.
-- **defaultProject** — the project the form snaps back to after each entry
-  (matched case-insensitively by name). Optional.
+The API key stays in shell.json; treat that file accordingly.
 
 For keyboard-only access, bind the panel toggle in
 `~/.config/hypr/bindings.lua`:
@@ -52,11 +53,15 @@ walks time → project → service → note, `Enter` books from anywhere.
   - `930` — entry from 9:30 until now
   - *empty* — start the mite tracker now (stop it later with `Ctrl+Enter`;
     the stop writes the `(start bis end)` prefix into the note)
-- Project and service pickers filter fuzzily while you type (`wr` finds
-  "Website Relaunch"); the top match is preselected, `Down`/`Up` pick,
-  `Tab` accepts and moves on. The placeholder shows the current selection.
+- Project and service are autocomplete comboboxes: the field shows the
+  current selection, focusing drops the list, typing fuzzy-filters it (`wr`
+  finds "Website Relaunch"), the top match is preselected, `Down`/`Up` pick,
+  `Tab` accepts and moves on. Free text that matches nothing never books.
 - After booking, the project snaps back to `defaultProject`, the service
   stays, time and note clear.
+- Click an entry in the timeline (or `Ctrl+E` on a selected one) to load it
+  into the form; `Enter` saves the changes, `Esc` cancels. An empty time
+  field keeps the entry's original timing.
 
 Below the form, the day timeline (8–18 h, growing with the entries):
 overlapping entries stand side by side in red; entries whose duration does
@@ -68,10 +73,12 @@ the last timed entry, dimmed. Chords work from any field:
 | `Ctrl+Left` / `Ctrl+Right` | previous / next day (chevrons do the same) |
 | `Ctrl+T` | back to today |
 | `Ctrl+Down` / `Ctrl+Up` | select an entry in the timeline |
+| `Ctrl+E` | edit the selected entry |
 | `Ctrl+D` | delete the selected entry (twice to confirm) |
 | `Ctrl+Enter` | stop the running tracker |
 | `Ctrl+R` | reload day, projects, and services |
-| `Esc` | clear selection, then close |
+| `Ctrl+,` | settings (also the ⚙ bottom right) |
+| `Esc` | clear query / edit / selection, then close |
 
 The bar widget polls mite once a minute. Red glyph: no tracker running and no
 entry prefix covering now. While the tracker runs, the label shows the

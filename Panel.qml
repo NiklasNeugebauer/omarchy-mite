@@ -67,6 +67,8 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  property bool settingsOpen: false
+
   function open() {
     refreshView()
     refreshCatalogs(false)
@@ -74,6 +76,7 @@ Panel {
     root.cursorIndex = -1
     root.pendingDeleteId = 0
     root.controller.show()
+    if (!root.configured) { openSettings(); return }
     // KeyboardPanel focuses focusTarget on open, but the first mapping can
     // hand focus to the first focusable item instead — insist on the time
     // field, since entry speed is the whole point.
@@ -154,7 +157,41 @@ Panel {
     refreshView()
   }
 
-  // ---- Booking.
+  // ---- Booking. The same form edits an existing entry: a click in the
+  //      timeline loads it, Enter then updates instead of creating.
+  property int editingId: 0
+
+  function startEdit(id) {
+    var entry = null
+    for (var i = 0; i < root.viewEntries.length; i++)
+      if (root.viewEntries[i].id === id) entry = root.viewEntries[i]
+    if (!entry) return
+    var range = Model.parseNoteRange(entry.note)
+    timeField.text = range ? Model.toDigits(range.start) + " " + Model.toDigits(range.end) : ""
+    noteField.text = range ? range.label : String(entry.note || "")
+    projectField.text = ""
+    projectField.selected = entry.project_id ? { id: entry.project_id, name: entry.project_name } : null
+    serviceField.text = ""
+    serviceField.selected = entry.service_id ? { id: entry.service_id, name: entry.service_name } : null
+    root.editingId = id
+    root.cursorIndex = -1
+    root.pendingDeleteId = 0
+    root.error = ""
+    timeField.forceActiveFocus()
+    timeField.selectAll()
+  }
+
+  function cancelEdit() {
+    root.editingId = 0
+    timeField.text = ""
+    noteField.text = ""
+    projectField.text = ""
+    serviceField.text = ""
+    var fallback = root.findDefaultProject()
+    if (fallback) projectField.selected = fallback
+    timeField.forceActiveFocus()
+  }
+
   function commit() {
     if (!root.configured || root.busy) return
     var time = Model.parseTimeInput(timeField.text, root.nowMinutes)
@@ -164,6 +201,7 @@ Panel {
     var service = serviceField.resolved()
     if (serviceField.text !== "" && !service) { root.error = "No service matches \"" + serviceField.text + "\""; return }
     var note = noteField.text.trim()
+    if (root.editingId !== 0) { commitEdit(time, project, service, note); return }
     var entry = {
       date_at: root.viewKey,
       project_id: project ? project.id : null,
@@ -197,8 +235,35 @@ Panel {
     }
   }
 
+  // Empty time keeps the entry's original timing (or lack of one); typed
+  // times move it and recompute the duration.
+  function commitEdit(time, project, service, note) {
+    var original = null
+    for (var i = 0; i < root.viewEntries.length; i++)
+      if (root.viewEntries[i].id === root.editingId) original = root.viewEntries[i]
+    if (!original) { root.error = "The entry is gone — reload with Ctrl+R"; root.editingId = 0; return }
+    var fields = {
+      project_id: project ? project.id : null,
+      service_id: service ? service.id : null,
+    }
+    if (time.mode === "track") {
+      var origRange = Model.parseNoteRange(original.note)
+      fields.note = origRange ? Model.composeNote(origRange.start, origRange.end, note) : note
+    } else {
+      fields.note = Model.composeNote(time.start, time.end, note)
+      fields.minutes = time.end - time.start
+    }
+    root.busy = true
+    Mite.updateEntry(root.miteConfig, root.editingId, fields, function(err) {
+      root.busy = false
+      if (err) { root.error = err; return }
+      root.afterCommit()
+    })
+  }
+
   function afterCommit() {
     root.error = ""
+    root.editingId = 0
     timeField.text = ""
     noteField.text = ""
     projectField.text = ""
@@ -242,6 +307,57 @@ Panel {
     })
   }
 
+  // ---- Settings, edited in place and written back to this widget's
+  //      shell.json entry. Applied locally first so the panel reacts on the
+  //      keystroke; the shell.json write comes back through the bar as the
+  //      same value.
+  function persistSettings(values) {
+    var entry = { id: root.moduleName }
+    for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
+    for (var key in values) entry[key] = values[key]
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function openSettings() {
+    settingsAccount.text = root.miteConfig.account
+    settingsApiKey.text = root.miteConfig.apiKey
+    settingsProject.text = root.defaultProjectName
+    root.settingsOpen = true
+    Qt.callLater(function() { settingsAccount.forceActiveFocus(); settingsAccount.selectAll() })
+  }
+
+  function saveSettings() {
+    persistSettings({
+      account: settingsAccount.text.trim(),
+      apiKey: settingsApiKey.text.trim(),
+      defaultProject: settingsProject.text.trim(),
+    })
+    root.settingsOpen = false
+    root.error = ""
+    root.catalogsFetchedAt = 0
+    Qt.callLater(function() {
+      refreshCatalogs(true)
+      refreshToday()
+      refreshView()
+      timeField.forceActiveFocus()
+    })
+  }
+
+  function cancelSettings() {
+    if (!root.configured) { root.close(); return }
+    root.settingsOpen = false
+    Qt.callLater(function() { timeField.forceActiveFocus() })
+  }
+
+  function handleSettingsKey(event, next, previous) {
+    if (event.key === Qt.Key_Escape) { cancelSettings(); event.accepted = true; return }
+    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { saveSettings(); event.accepted = true; return }
+    if (event.key === Qt.Key_Tab) { next.forceActiveFocus(); event.accepted = true; return }
+    if (event.key === Qt.Key_Backtab) { previous.forceActiveFocus(); event.accepted = true; return }
+  }
+
   // ---- Entry cursor and deletion.
   function moveCursor(delta) {
     var count = root.dayLayout.slots.length
@@ -273,8 +389,14 @@ Panel {
     var ctrl = event.modifiers & Qt.ControlModifier
     if (event.key === Qt.Key_Escape) {
       if (root.pendingDeleteId !== 0) root.pendingDeleteId = 0
+      else if (root.editingId !== 0) root.cancelEdit()
       else if (root.cursorIndex !== -1) root.cursorIndex = -1
       else root.close()
+      return true
+    }
+    if (ctrl && event.key === Qt.Key_E) {
+      if (root.cursorIndex >= 0 && root.cursorIndex < root.dayLayout.slots.length)
+        root.startEdit(root.dayLayout.slots[root.cursorIndex].id)
       return true
     }
     if (ctrl && event.key === Qt.Key_Left) { root.moveDay(-1); return true }
@@ -284,6 +406,7 @@ Panel {
     if (ctrl && event.key === Qt.Key_T) { root.goToToday(); return true }
     if (ctrl && event.key === Qt.Key_D) { root.requestDelete(); return true }
     if (ctrl && event.key === Qt.Key_R) { root.refreshView(); root.refreshCatalogs(true); return true }
+    if (ctrl && event.key === Qt.Key_Comma) { root.openSettings(); return true }
     if (ctrl && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) { root.stopTracking(); return true }
     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.commit(); return true }
     return false
@@ -330,46 +453,70 @@ Panel {
     return Model.formatClock(d.getHours() * 60 + d.getMinutes())
   }
 
-  // ---- Fuzzy picker field: the text is the query, the placeholder shows
-  //      the current selection, suggestions render in the shared strip
-  //      below the form. Tab accepts the highlighted match and moves on.
+  component SettingsLabel: Text {
+    textFormat: Text.PlainText
+    color: Qt.darker(root.fg, 1.6)
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  // ---- Autocomplete combobox for project/service: a selector, not an open
+  //      entry field. The field shows the current selection; focusing drops
+  //      the full list, typing fuzzy-filters it, and free text that matches
+  //      nothing never books. Tab accepts the highlighted match and moves on.
   component FuzzyField: TextField {
     id: field
     property var items: []
     property var selected: null
     property string emptyLabel: ""
     property int highlight: 0
+    // Arrow-navigating the unfiltered list is also a choice, so Tab/Enter
+    // must take the highlighted row even with nothing typed.
+    property bool navigated: false
     property Item nextField: null
     property Item previousField: null
-    readonly property var matches: Model.fuzzyFilter(items, text, function(x) { return x.name }).slice(0, 5)
-    readonly property bool suggesting: activeFocus && text !== ""
+    readonly property var matches: Model.fuzzyFilter(items, text, function(x) { return x.name }).slice(0, 8)
+    readonly property bool listOpen: activeFocus && matches.length > 0
 
     foreground: root.fg
     accent: Color.accent
     font.family: root.fontFamily
     font.pixelSize: Style.font.body
-    placeholderText: selected ? selected.name : emptyLabel
+    rightPadding: Style.space(24)
+    placeholderText: selected ? "" : emptyLabel
 
     onTextChanged: highlight = 0
+    onActiveFocusChanged: if (!activeFocus) { navigated = false; highlight = 0 }
+
+    function choice() {
+      return (text !== "" || navigated) && matches.length > 0
+        ? matches[Math.min(highlight, matches.length - 1)] : null
+    }
 
     function resolved() {
-      if (text !== "" && matches.length > 0) return matches[Math.min(highlight, matches.length - 1)]
-      if (text !== "") return null   // typed but nothing matches: don't book blind
+      var hit = choice()
+      if (hit) return hit
+      if (text !== "") return null
       return selected
     }
 
     function accept() {
-      var hit = resolved()
-      if (text !== "" && hit) { selected = hit; text = "" }
+      var hit = choice()
+      if (hit) { selected = hit; text = ""; navigated = false }
     }
 
     Keys.priority: Keys.BeforeItem
     Keys.onPressed: function(event) {
-      if (suggesting && event.key === Qt.Key_Down && !(event.modifiers & Qt.ControlModifier)) {
-        highlight = Math.min(highlight + 1, matches.length - 1); event.accepted = true; return
+      var plain = !(event.modifiers & Qt.ControlModifier)
+      if (listOpen && plain && event.key === Qt.Key_Down) {
+        highlight = Math.min(highlight + 1, matches.length - 1); navigated = true; event.accepted = true; return
       }
-      if (suggesting && event.key === Qt.Key_Up && !(event.modifiers & Qt.ControlModifier)) {
-        highlight = Math.max(highlight - 1, 0); event.accepted = true; return
+      if (listOpen && plain && event.key === Qt.Key_Up) {
+        highlight = Math.max(highlight - 1, 0); navigated = true; event.accepted = true; return
+      }
+      if (event.key === Qt.Key_Escape && text !== "") {
+        text = ""; navigated = false; event.accepted = true; return
       }
       if (event.key === Qt.Key_Tab) {
         accept()
@@ -386,6 +533,90 @@ Panel {
         accept()
       }
       event.accepted = root.handleGlobalKey(event)
+    }
+
+    // Current selection, rendered as the field's value while no query is
+    // being typed.
+    Text {
+      visible: field.text === "" && field.selected !== null
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.left: parent.left
+      anchors.leftMargin: field.leftPadding
+      anchors.right: parent.right
+      anchors.rightMargin: field.rightPadding
+      textFormat: Text.PlainText
+      elide: Text.ElideRight
+      text: field.selected ? field.selected.name : ""
+      color: field.activeFocus ? Qt.darker(root.fg, 1.4) : root.fg
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.body
+    }
+
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(8)
+      textFormat: Text.PlainText
+      text: "\u{f0140}"
+      color: Qt.darker(root.fg, 1.9)
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+
+    Rectangle {
+      visible: field.listOpen
+      y: field.height + Style.space(2)
+      width: Math.max(field.width, Style.space(240))
+      height: listColumn.implicitHeight + Style.space(8)
+      z: 100
+      radius: Style.cornerRadius
+      color: Color.popups.background
+      border.width: Style.normalBorderWidth
+      border.color: Color.popups.border
+
+      Column {
+        id: listColumn
+        anchors.fill: parent
+        anchors.margins: Style.space(4)
+
+        Repeater {
+          model: field.matches
+
+          Rectangle {
+            required property var modelData
+            required property int index
+            width: parent.width
+            height: Style.spacing.popupRowHeight
+            radius: Style.cornerRadius
+            color: index === field.highlight
+              ? Style.selectedFillFor(root.fg, Color.accent)
+              : "transparent"
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(8)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(8)
+              textFormat: Text.PlainText
+              elide: Text.ElideRight
+              text: modelData.name + (modelData.customer_name ? "  ·  " + modelData.customer_name : "")
+              color: Color.popups.text
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              onClicked: {
+                field.highlight = index
+                field.navigated = true
+                field.accept()
+              }
+            }
+          }
+        }
+      }
     }
   }
 
@@ -441,10 +672,65 @@ Panel {
         }
       }
 
-      // ---- Entry form: time · project · service, then the note.
+      // ---- Settings, in place of the day view while open.
+      Column {
+        visible: root.settingsOpen
+        width: parent.width
+        spacing: Style.space(8)
+
+        SettingsLabel { text: "ACCOUNT — https://<account>.mite.de" }
+
+        TextField {
+          id: settingsAccount
+          width: parent.width
+          foreground: root.fg
+          accent: Color.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          placeholderText: "account"
+          Keys.priority: Keys.BeforeItem
+          Keys.onPressed: function(event) { root.handleSettingsKey(event, settingsApiKey, settingsProject) }
+        }
+
+        SettingsLabel { text: "API KEY — mite → Account" }
+
+        TextField {
+          id: settingsApiKey
+          width: parent.width
+          foreground: root.fg
+          accent: Color.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          password: true
+          placeholderText: "api key"
+          Keys.priority: Keys.BeforeItem
+          Keys.onPressed: function(event) { root.handleSettingsKey(event, settingsProject, settingsAccount) }
+        }
+
+        SettingsLabel { text: "DEFAULT PROJECT — after each booking" }
+
+        TextField {
+          id: settingsProject
+          width: parent.width
+          foreground: root.fg
+          accent: Color.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          placeholderText: "project name, or empty"
+          Keys.priority: Keys.BeforeItem
+          Keys.onPressed: function(event) { root.handleSettingsKey(event, settingsAccount, settingsApiKey) }
+        }
+
+        SettingsLabel { text: "Enter saves · Esc " + (root.configured ? "cancels" : "closes") }
+      }
+
+      // ---- Entry form: time · project · service, then the note. Raised so
+      //      the picker dropdowns paint over the rows below.
       Row {
+        visible: !root.settingsOpen
         width: parent.width
         spacing: Style.space(6)
+        z: 10
 
         TextField {
           id: timeField
@@ -484,6 +770,7 @@ Panel {
 
       TextField {
         id: noteField
+        visible: !root.settingsOpen
         width: parent.width
         foreground: root.fg
         accent: Color.accent
@@ -499,57 +786,19 @@ Panel {
         }
       }
 
-      // ---- Suggestion strip for whichever picker is filtering.
-      Column {
-        readonly property var host: projectField.suggesting ? projectField
-          : serviceField.suggesting ? serviceField : null
-        visible: host !== null
-        width: parent.width
-        spacing: 0
-
-        Repeater {
-          model: parent.host ? parent.host.matches : []
-
-          Rectangle {
-            required property var modelData
-            required property int index
-            width: parent.width
-            height: Style.spacing.popupRowHeight
-            radius: Style.cornerRadius
-            color: parent.host && index === parent.host.highlight
-              ? Style.selectedFillFor(root.fg, Color.accent)
-              : "transparent"
-
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.left: parent.left
-              anchors.leftMargin: Style.space(8)
-              anchors.right: parent.right
-              anchors.rightMargin: Style.space(8)
-              textFormat: Text.PlainText
-              elide: Text.ElideRight
-              text: modelData.name + (modelData.customer_name ? "   ·  " + modelData.customer_name : "")
-              color: root.fg
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-            }
-
-            MouseArea {
-              anchors.fill: parent
-              onClicked: {
-                var host = parent.parent.host
-                if (!host) return
-                host.highlight = parent.index
-                host.accept()
-              }
-            }
-          }
-        }
+      // ---- Edit-mode line.
+      Text {
+        visible: root.editingId !== 0 && !root.settingsOpen
+        textFormat: Text.PlainText
+        text: "editing entry — Enter saves · Esc cancels"
+        color: Color.accent
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
       }
 
       // ---- Tracker line, only while one runs.
       Row {
-        visible: root.trackingEntry !== null
+        visible: root.trackingEntry !== null && !root.settingsOpen
         spacing: Style.space(8)
 
         Rectangle {
@@ -583,12 +832,13 @@ Panel {
         font.pixelSize: Style.font.bodySmall
       }
 
-      PanelSeparator { width: parent.width; foreground: root.fg }
+      PanelSeparator { visible: !root.settingsOpen; width: parent.width; foreground: root.fg }
 
       // ---- Day timeline. Positioned by the note prefix; overlaps side by
       //      side in urgent; entries without clock times hang below, dimmed.
       Item {
         id: timeline
+        visible: !root.settingsOpen
         readonly property int fromMinutes: root.dayLayout.fromMinutes
         readonly property int toMinutes: root.dayLayout.toMinutes
         readonly property real pxPerMinute: Style.spaceReal(36) / 60
@@ -648,7 +898,7 @@ Panel {
           Rectangle {
             required property var modelData
             required property int index
-            readonly property bool current: index === root.cursorIndex
+            readonly property bool current: index === root.cursorIndex || root.editingId === modelData.id
             readonly property bool deleting: root.pendingDeleteId === modelData.id
             readonly property real laneWidth: (timeline.width - timeline.labelGutter) / modelData.columns
 
@@ -693,10 +943,7 @@ Panel {
 
             MouseArea {
               anchors.fill: parent
-              onClicked: {
-                root.cursorIndex = index
-                root.pendingDeleteId = 0
-              }
+              onClicked: root.startEdit(parent.modelData.id)
             }
           }
         }
@@ -712,14 +959,17 @@ Panel {
         }
       }
 
-      // ---- Footer: the day's total, and the chord cheat-sheet.
+      // ---- Footer: the day's total, the chord cheat-sheet, and the way
+      //      into the settings — deliberately quiet.
       Item {
+        visible: !root.settingsOpen
         width: parent.width
-        height: totalText.implicitHeight
+        height: Math.max(totalText.implicitHeight, settingsButton.height)
 
         Text {
           textFormat: Text.PlainText
           anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
           text: "Ctrl+←/→ day · Ctrl+↓/↑ select · Ctrl+D delete ×2"
           color: Qt.darker(root.fg, 1.9)
           font.family: root.fontFamily
@@ -729,12 +979,26 @@ Panel {
         Text {
           id: totalText
           textFormat: Text.PlainText
-          anchors.right: parent.right
+          anchors.right: settingsButton.left
+          anchors.rightMargin: Style.space(6)
+          anchors.verticalCenter: parent.verticalCenter
           text: Model.formatClock(Model.totalMinutes(root.viewEntries)) + " h"
           color: root.fg
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
           font.bold: true
+        }
+
+        PanelActionButton {
+          id: settingsButton
+          anchors.right: parent.right
+          anchors.rightMargin: -Style.space(6)
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: "\u{f0493}"
+          tooltipText: "Settings (Ctrl+,)"
+          foreground: Qt.darker(root.fg, 1.9)
+          fontFamily: root.fontFamily
+          onClicked: root.openSettings()
         }
       }
     }

@@ -53,6 +53,11 @@ function parseTimeInput(text, nowMinutes) {
 
 var NOTE_RANGE = /^\((\d{1,2}):(\d{2}) bis (\d{1,2}):(\d{2})\)\s*/
 
+/** 570 → "930": the bare-digit form the time field takes. */
+function toDigits(minutes) {
+  return String(Math.floor(minutes / 60)) + String(minutes % 60).padStart(2, "0")
+}
+
 /** "570" → "9:30" (no leading zero on hours, like mite). */
 function formatClock(minutes) {
   var m = Math.round(minutes)
@@ -273,12 +278,14 @@ function minutesNow(date) {
   return date.getHours() * 60 + date.getMinutes()
 }
 
-// QML `import "Model.js" as Model` sees top-level functions; node's test
-// runner loads this file through test/qmljs.mjs which collects the same.
+// QML's `import "Model.js" as Model` sees the top-level functions directly;
+// node (which runs the tests) needs them exported, and defines `module`
+// where QML's JS environment does not.
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     parseTimeToken: parseTimeToken,
     parseTimeInput: parseTimeInput,
+    toDigits: toDigits,
     formatClock: formatClock,
     notePrefix: notePrefix,
     parseNoteRange: parseNoteRange,

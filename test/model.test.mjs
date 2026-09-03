@@ -100,6 +100,11 @@ test("isActive", () => {
   assert.ok(!M.isActive([{ note: "(10:00 bis 11:00)" }], now), "end is exclusive")
 })
 
+test("toDigits round-trips through parseTimeToken", () => {
+  for (const m of [0, 5, 570, 735, 23 * 60 + 59])
+    assert.equal(M.parseTimeToken(M.toDigits(m)), m)
+})
+
 test("totals and dates", () => {
   assert.equal(M.totalMinutes([{ minutes: 30 }, { minutes: 75 }]), 105)
   assert.equal(M.formatClock(405), "6:45")
