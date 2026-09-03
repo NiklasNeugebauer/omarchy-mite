@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "niklasneugebauer.mite",
+  "name": "mite",
+  "version": "0.1.0",
+  "author": "Niklas Neugebauer",
+  "description": "mite time tracking on the Omarchy bar: fast keyboard entry, day timeline, tracker state at a glance",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "mite",
+    "description": "mite time tracking: fast keyboard entry and a day timeline",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
