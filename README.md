@@ -54,8 +54,18 @@ walks time → project → service → note, `Enter` books from anywhere.
 - Project and service are autocomplete comboboxes: the field shows the
   current selection, focusing drops the list, typing fuzzy-filters it (`wr`
   finds "Website Relaunch"), the top match is preselected, `Down`/`Up` pick,
-  `Tab` accepts and moves on. With a choice pending, `Enter` only selects —
+  `Tab` accepts and moves on. Projects also match on their customer, and
+  query words are matched separately, in any order: `nord`, `nordwnd` and
+  `nord bild` all find "Bildanalyse" under customer "Nordwind 4711".
+  With a choice pending, `Enter` only selects —
   another `Enter` books. Free text that matches nothing never books.
+- `Ctrl+R` is the shell's reverse search, on bookings: it turns the note
+  field into a query over the descriptions of the last 90 days (`historyDays`
+  in shell.json), and taking a
+  hit fills in description, project **and** service — only the time is left
+  to type. `Ctrl+R` again steps to the next match, `Esc` puts the note back.
+  Repeats are collapsed, most recently used first, so an empty query simply
+  lists what you did last.
 - Every booking needs a project, picked deliberately: after booking, the
   project clears. The service stays — also across restarts — time and note
   clear.
@@ -73,11 +83,14 @@ the last timed entry, dimmed. Chords work from any field:
 | `Ctrl+Left` / `Ctrl+Right` | previous / next day (chevrons do the same) |
 | `Ctrl+T` | back to today |
 | `Ctrl+Down` / `Ctrl+Up` | select an entry in the timeline |
+| `Ctrl+J` / `Ctrl+K` | the same, and walks an open picker or history list |
 | `Ctrl+E` | edit the selected entry |
 | `Ctrl+D` | delete the selected entry (twice to confirm) |
 | `Ctrl+Enter` | start/stop the tracker |
-| `Ctrl+R` | reload day, projects, and services |
+| `Ctrl+R` | search past descriptions; again for the next match |
+| `Ctrl+Shift+R` | reload day, projects, services, and history |
 | `Ctrl+,` | settings (also the ⚙ bottom right) |
+| `Ctrl+/` | the shortcut list (also the ⌨ bottom left) |
 | `Esc` | clear query / edit / selection, then close |
 
 The bar widget polls mite once a minute. Red glyph: no tracker running and no
@@ -91,4 +104,6 @@ node --test   # model layer: time parsing, note prefix, fuzzy match, day layout
 ```
 
 Saved changes hot-reload into the running shell
-(`omarchy-shell shell rescanPlugins` forces it).
+(`omarchy-shell shell rescanPlugins` forces it). Edits to `Panel.qml` can be
+missed by both, since the panel component is already instantiated — reach for
+`omarchy restart shell` when a change does not show up.

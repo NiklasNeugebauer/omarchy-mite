@@ -95,43 +95,171 @@ function ensurePrefix(note, start, end) {
   return composeNote(start, end, note)
 }
 
-// ---- Fuzzy matching for the project/service pickers. Subsequence match;
-//      earlier and word-initial hits score higher, so "wr" finds
-//      "Website Relaunch" before "Lowrider".
+// ---- Fuzzy matching for the project/service pickers.
+//
+// A project is worth finding by anything that names it: its own name or its
+// customer (the cost centre a project hangs under). Words of the query are
+// matched independently, each against whichever field suits it best, so
+// "nord bild" finds the project "Bildanalyse" of customer "Nordwind 4711"
+// and word order does not matter. Within one word the match is a subsequence
+// ("nordwnd" → "Nordwind"), scored so that word-initial and contiguous hits
+// win: "wr" finds "Website Relaunch" before "Lowrider".
 
-/** @returns {number} score, or -1 when query is not a subsequence of text. */
-function fuzzyScore(query, text) {
-  var q = String(query || "").toLowerCase()
-  var t = String(text || "").toLowerCase()
-  if (q === "") return 0
+var WORD_BREAK = /[\s\-_./&,()[\]]/
+
+var CHAR_BASE = 10        // every matched character is worth having
+var WORD_START = 15
+var CONSECUTIVE = 10
+var MAX_GAP_COST = 6      // capped, so a long name is not ruled out by one gap
+var MAX_START_COST = 10
+var SECONDARY_FIELD = 0.7 // a hit on the customer ranks under one on the name
+
+/**
+ * Greedy subsequence match of `word` in `text`, anchored at `text[start]`.
+ * Costs stay below CHAR_BASE per character, so any match scores >= 0.
+ * @returns {number} score, or -1 when the rest of `word` does not fit.
+ */
+function scoreFrom(word, text, start) {
   var score = 0
-  var ti = 0
+  var ti = start
   var prev = -2
-  for (var qi = 0; qi < q.length; qi++) {
-    var idx = t.indexOf(q[qi], ti)
+  for (var qi = 0; qi < word.length; qi++) {
+    var idx = text.indexOf(word[qi], ti)
     if (idx === -1) return -1
-    if (idx === 0 || /[\s\-_./]/.test(t[idx - 1])) score += 10  // word start
-    if (idx === prev + 1) score += 5                            // consecutive
-    score -= (idx - ti)                                         // gaps cost
+    score += CHAR_BASE
+    if (idx === 0 || WORD_BREAK.test(text[idx - 1])) score += WORD_START
+    if (idx === prev + 1) score += CONSECUTIVE
+    else if (qi > 0) score -= Math.min(idx - ti, MAX_GAP_COST)
     prev = idx
     ti = idx + 1
   }
-  if (t === q) score += 100
-  return score
+  return score - Math.min(start, MAX_START_COST)
+}
+
+/**
+ * Best placement of one query word in one field. Every start is tried, not
+ * just the leftmost, so a walk that begins on an early stray character can
+ * never hide the tight match further along.
+ * @returns {number} score, or -1 when the word is no subsequence of the field.
+ */
+function wordScore(word, text) {
+  if (word === "") return 0
+  var best = -1
+  for (var s = 0; s + word.length <= text.length; s++) {
+    if (text[s] !== word[0]) continue
+    var score = scoreFrom(word, text, s)
+    if (score > best) best = score
+  }
+  if (best < 0) return -1
+  if (text === word) return best + 100
+  if (text.indexOf(word) === 0) return best + 30
+  return best
+}
+
+/** Best field for one word, ranked down for fields after the first. */
+function fieldScore(word, fields) {
+  var best = -1
+  for (var i = 0; i < fields.length; i++) {
+    var s = wordScore(word, fields[i])
+    if (s < 0) continue
+    if (i > 0) s *= SECONDARY_FIELD
+    if (s > best) best = s
+  }
+  return best
+}
+
+/**
+ * @param query  whitespace-separated words, each matched on its own
+ * @param text   one string, or several fields in order of importance
+ * @returns {number} summed score, or -1 when a word matches no field.
+ */
+function fuzzyScore(query, text) {
+  var raw = Array.isArray(text) ? text : [text]
+  var fields = []
+  for (var f = 0; f < raw.length; f++) {
+    var value = String(raw[f] == null ? "" : raw[f]).toLowerCase()
+    if (value !== "") fields.push(value)
+  }
+  var words = String(query == null ? "" : query).toLowerCase().trim().split(/\s+/)
+    .filter(function(w) { return w !== "" })
+  var total = 0
+  for (var w = 0; w < words.length; w++) {
+    var s = fieldScore(words[w], fields)
+    if (s < 0) return -1
+    total += s
+  }
+  return total
 }
 
 /**
  * Filter and rank by fuzzy score; stable for equal scores.
- * @param {Array} items  @param {function} nameOf  @returns {Array}
+ * @param {Array} items
+ * @param {function} fieldsOf  item → string or array of strings to match on
+ * @returns {Array}
  */
-function fuzzyFilter(items, query, nameOf) {
+function fuzzyFilter(items, query, fieldsOf) {
   var scored = []
   for (var i = 0; i < items.length; i++) {
-    var s = fuzzyScore(query, nameOf(items[i]))
+    var s = fuzzyScore(query, fieldsOf(items[i]))
     if (s >= 0) scored.push({ item: items[i], score: s, index: i })
   }
   scored.sort(function(a, b) { return b.score - a.score || a.index - b.index })
   return scored.map(function(e) { return e.item })
+}
+
+// ---- Description history, the shell's Ctrl+R applied to bookings. Past
+//      entries collapse to their distinct (description, project, service)
+//      triples: recalling one recalls the whole booking, not just its text.
+//      Most recently used first, so an empty query lists what you did last.
+
+/**
+ * @param entries  raw mite time entries, any order
+ * @returns {Array} {label, project_id, project_name, customer_name,
+ *   service_id, service_name, date, count}
+ */
+function historyFrom(entries) {
+  var seen = {}
+  var out = []
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i]
+    // Stripped repeatedly: a note that got prefixed twice (mite's web timer
+    // stopped inside one minute, then edited) is all clock and no
+    // description, and drops out rather than being offered back.
+    var label = String(e.note || "")
+    for (var range = parseNoteRange(label); range; range = parseNoteRange(label)) label = range.label
+    label = label.trim()
+    if (label === "") continue
+    var date = String(e.date_at || "")
+    // "k:" keeps a description like "constructor" off Object.prototype.
+    var key = "k:" + label.toLowerCase() + " " + (e.project_id || 0) + " " + (e.service_id || 0)
+    if (seen[key]) {
+      seen[key].count += 1
+      // Keep the spelling that goes with the most recent booking.
+      if (date > seen[key].date) { seen[key].date = date; seen[key].label = label }
+      continue
+    }
+    seen[key] = {
+      label: label,
+      project_id: e.project_id || 0,
+      project_name: e.project_name || "",
+      customer_name: e.customer_name || "",
+      service_id: e.service_id || 0,
+      service_name: e.service_name || "",
+      date: date,
+      count: 1,
+    }
+    out.push(seen[key])
+  }
+  out.sort(function(a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0 })
+  return out
+}
+
+/** "2026-09-16" → a local Date; `new Date(key)` would read it as UTC. */
+function parseDateKey(key) {
+  var p = String(key || "").split("-")
+  if (p.length !== 3) return null
+  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]))
+  return isNaN(d.getTime()) ? null : d
 }
 
 // ---- Day timeline. Entries with a note prefix are positioned by it;
@@ -304,6 +432,8 @@ if (typeof module !== "undefined" && module.exports) {
     ensurePrefix: ensurePrefix,
     fuzzyScore: fuzzyScore,
     fuzzyFilter: fuzzyFilter,
+    historyFrom: historyFrom,
+    parseDateKey: parseDateKey,
     layoutDay: layoutDay,
     totalMinutes: totalMinutes,
     isActive: isActive,

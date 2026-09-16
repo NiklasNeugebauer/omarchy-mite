@@ -25,6 +25,7 @@ Panel {
   })
   readonly property bool configured: miteConfig.account !== "" && miteConfig.apiKey !== ""
   readonly property int refreshMinutes: Math.max(1, parseInt(setting("refreshMinutes", 1), 10) || 1)
+  readonly property int historyDays: Math.max(1, parseInt(setting("historyDays", 90), 10) || 90)
 
   // ---- Clock. nowMinutes drives the red state, the tracker slot, and the
   //      now-line, so a minute tick keeps all three honest.
@@ -65,6 +66,21 @@ Panel {
   property int cursorIndex: -1
   property int pendingDeleteId: 0
 
+  // ---- Description history (Ctrl+R), the shell's reverse search on past
+  //      bookings. The note field doubles as the query line; taking a hit
+  //      restores description, project and service at once, since a repeat
+  //      of yesterday's work is the common booking.
+  property var history: []
+  property double historyFetchedAt: 0
+  property bool historyOpen: false
+  property int historyIndex: 0
+  property string historyRestore: ""
+  readonly property var historyMatches: root.historyOpen
+    ? Model.fuzzyFilter(root.history, noteField.text, function(h) {
+        return [h.label, h.project_name, h.customer_name, h.service_name]
+      }).slice(0, 8)
+    : []
+
   // ---- Colors.
   readonly property color fg: barForeground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
@@ -75,10 +91,45 @@ Panel {
 
   property bool settingsOpen: false
 
+  // ---- The chord sheet, once a footer line and now too long for one. It
+  //      takes the timeline's place while open; the form stays live, so it
+  //      can be read while typing.
+  property bool shortcutsOpen: false
+  readonly property var shortcutGroups: [
+    { title: "FORM", rows: [
+      { keys: "Tab / Shift+Tab", what: "walk time → project → service → note" },
+      { keys: "Enter", what: "book, or save the entry being edited" },
+      { keys: "Ctrl+Enter", what: "start / stop the tracker" },
+      { keys: "Ctrl+R", what: "search past descriptions" },
+      { keys: "Esc", what: "back out step by step, then close" },
+    ] },
+    { title: "DAY AND ENTRIES", rows: [
+      { keys: "Ctrl+← / →", what: "previous / next day" },
+      { keys: "Ctrl+T", what: "back to today" },
+      { keys: "Ctrl+↓ / ↑", what: "select an entry in the timeline" },
+      { keys: "Ctrl+J / K", what: "the same, and walks an open list" },
+      { keys: "Ctrl+E", what: "edit the selected entry" },
+      { keys: "Ctrl+D", what: "delete the selected entry, twice to confirm" },
+    ] },
+    { title: "PANEL", rows: [
+      { keys: "Ctrl+Shift+R", what: "reload day, projects, services, history" },
+      { keys: "Ctrl+,", what: "settings" },
+      { keys: "Ctrl+/", what: "this list" },
+    ] },
+  ]
+
+  function toggleShortcuts() {
+    root.shortcutsOpen = !root.shortcutsOpen
+    if (root.shortcutsOpen) root.closeHistory(true)
+  }
+
   function open() {
     refreshView()
     refreshCatalogs(false)
+    refreshHistory(false)
     root.error = ""
+    root.historyOpen = false
+    root.shortcutsOpen = false
     root.cursorIndex = -1
     root.pendingDeleteId = 0
     root.controller.show()
@@ -142,6 +193,58 @@ Panel {
           if (list[i].id === last) serviceField.selected = list[i]
       }
     })
+  }
+
+  // A quarter of bookings is deep enough to recall anything recurring and
+  // still one request; it is only refetched when the panel has been shut for
+  // a while, or on Ctrl+Shift+R.
+  function refreshHistory(force) {
+    if (!root.configured) return
+    var age = Date.now() - root.historyFetchedAt
+    if (!force && root.history.length > 0 && age < 15 * 60 * 1000) return
+    root.historyFetchedAt = Date.now()
+    var today = new Date()
+    Mite.fetchEntryRange(root.miteConfig,
+      Model.dateKey(Model.addDays(today, -root.historyDays)), Model.dateKey(today),
+      function(err, entries) {
+        if (err) { root.historyFetchedAt = 0; root.error = err; return }
+        root.history = Model.historyFrom(entries)
+      })
+  }
+
+  function openHistory() {
+    if (!root.configured || root.settingsOpen) return
+    refreshHistory(false)
+    // Whatever is already typed seeds the search, so "standup" then Ctrl+R
+    // goes straight to the match; Esc puts it back untouched.
+    root.historyRestore = noteField.text
+    root.historyIndex = 0
+    root.historyOpen = true
+    noteField.forceActiveFocus()
+  }
+
+  function closeHistory(restore) {
+    if (!root.historyOpen) return
+    root.historyOpen = false
+    root.historyIndex = 0
+    if (restore) noteField.text = root.historyRestore
+  }
+
+  function acceptHistory() {
+    var hit = root.historyMatches[Math.min(root.historyIndex, root.historyMatches.length - 1)]
+    if (!hit) { closeHistory(true); return }
+    closeHistory(false)
+    noteField.text = hit.label
+    noteField.cursorPosition = noteField.text.length
+    if (hit.project_id) {
+      projectField.selected = { id: hit.project_id, name: hit.project_name, customer_name: hit.customer_name }
+      projectField.text = ""
+    }
+    if (hit.service_id) {
+      serviceField.selected = { id: hit.service_id, name: hit.service_name }
+      serviceField.text = ""
+    }
+    noteField.forceActiveFocus()
   }
 
   function moveDay(delta) {
@@ -272,7 +375,7 @@ Panel {
     var original = null
     for (var i = 0; i < root.viewEntries.length; i++)
       if (root.viewEntries[i].id === root.editingId) original = root.viewEntries[i]
-    if (!original) { root.error = "The entry is gone — reload with Ctrl+R"; root.editingId = 0; return }
+    if (!original) { root.error = "The entry is gone — reload with Ctrl+Shift+R"; root.editingId = 0; return }
     var fields = {
       project_id: project ? project.id : null,
       service_id: service ? service.id : null,
@@ -357,6 +460,7 @@ Panel {
   }
 
   function openSettings() {
+    root.shortcutsOpen = false
     settingsAccount.text = root.miteConfig.account
     settingsApiKey.text = root.miteConfig.apiKey
     root.settingsOpen = true
@@ -417,12 +521,51 @@ Panel {
     })
   }
 
+  // Ctrl+R opens the history and, while it is open, steps to the next match —
+  // the shell's reverse search, held down rather than typed anew. While the
+  // list is up the note field is a query, so Enter takes a hit instead of
+  // booking and the arrows walk matches instead of the timeline.
+  // Returns true when the key was consumed.
+  function handleHistoryKey(event) {
+    var ctrl = event.modifiers & Qt.ControlModifier
+    var shift = event.modifiers & Qt.ShiftModifier
+    if (ctrl && !shift && event.key === Qt.Key_R) {
+      if (!root.historyOpen) root.openHistory()
+      else if (root.historyMatches.length > 0)
+        root.historyIndex = (root.historyIndex + 1) % root.historyMatches.length
+      return true
+    }
+    if (!root.historyOpen) return false
+    if (event.key === Qt.Key_Escape) { root.closeHistory(true); return true }
+    if (event.key === Qt.Key_Down || (ctrl && event.key === Qt.Key_J)) {
+      root.historyIndex = Math.min(root.historyIndex + 1, Math.max(0, root.historyMatches.length - 1))
+      return true
+    }
+    if (event.key === Qt.Key_Up || (ctrl && event.key === Qt.Key_K)) {
+      root.historyIndex = Math.max(root.historyIndex - 1, 0)
+      return true
+    }
+    // Ctrl+Enter is swallowed too: a recalled booking is worth a second
+    // keystroke, rather than starting a tracker on the way past.
+    if (event.key === Qt.Key_Tab || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+      root.acceptHistory()
+      return true
+    }
+    return false
+  }
+
   // Shared by every field: the chords that must work no matter what has
   // focus. Returns true when the key was consumed.
   function handleGlobalKey(event) {
+    if (root.handleHistoryKey(event)) return true
     var ctrl = event.modifiers & Qt.ControlModifier
+    // Shift is ignored: "/" is a shifted key on many layouts.
+    if (ctrl && (event.key === Qt.Key_Slash || event.key === Qt.Key_Question)) {
+      root.toggleShortcuts(); return true
+    }
     if (event.key === Qt.Key_Escape) {
-      if (root.pendingDeleteId !== 0) root.pendingDeleteId = 0
+      if (root.shortcutsOpen) root.shortcutsOpen = false
+      else if (root.pendingDeleteId !== 0) root.pendingDeleteId = 0
       else if (root.editingId !== 0) root.cancelEdit()
       else if (root.cursorIndex !== -1) root.cursorIndex = -1
       else root.close()
@@ -435,11 +578,16 @@ Panel {
     }
     if (ctrl && event.key === Qt.Key_Left) { root.moveDay(-1); return true }
     if (ctrl && event.key === Qt.Key_Right) { root.moveDay(1); return true }
-    if (ctrl && event.key === Qt.Key_Down) { root.moveCursor(1); return true }
-    if (ctrl && event.key === Qt.Key_Up) { root.moveCursor(-1); return true }
+    // Ctrl+J/K stand in for the arrows wherever a selection moves; a list
+    // that is open claims them first, so they land on the timeline only when
+    // no picker or history is up.
+    if (ctrl && (event.key === Qt.Key_Down || event.key === Qt.Key_J)) { root.moveCursor(1); return true }
+    if (ctrl && (event.key === Qt.Key_Up || event.key === Qt.Key_K)) { root.moveCursor(-1); return true }
     if (ctrl && event.key === Qt.Key_T) { root.goToToday(); return true }
     if (ctrl && event.key === Qt.Key_D) { root.requestDelete(); return true }
-    if (ctrl && event.key === Qt.Key_R) { root.refreshView(); root.refreshCatalogs(true); return true }
+    if (ctrl && (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_R) {
+      root.refreshView(); root.refreshCatalogs(true); root.refreshHistory(true); return true
+    }
     if (ctrl && event.key === Qt.Key_Comma) { root.openSettings(); return true }
     if (ctrl && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) { root.toggleTracker(); return true }
     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { root.commit(); return true }
@@ -523,7 +671,10 @@ Panel {
     property bool navigated: false
     property Item nextField: null
     property Item previousField: null
-    readonly property var matches: Model.fuzzyFilter(items, text, function(x) { return x.name }).slice(0, 8)
+    // Projects carry a customer (the Kostenstelle); services do not, and an
+    // absent field simply drops out of the match.
+    readonly property var matches: Model.fuzzyFilter(items, text,
+      function(x) { return [x.name, x.customer_name] }).slice(0, 8)
     readonly property bool listOpen: activeFocus && matches.length > 0
 
     foreground: root.fg
@@ -556,10 +707,11 @@ Panel {
     Keys.priority: Keys.BeforeItem
     Keys.onPressed: function(event) {
       var plain = !(event.modifiers & Qt.ControlModifier)
-      if (listOpen && plain && event.key === Qt.Key_Down) {
+      var ctrl = event.modifiers & Qt.ControlModifier
+      if (listOpen && ((plain && event.key === Qt.Key_Down) || (ctrl && event.key === Qt.Key_J))) {
         highlight = Math.min(highlight + 1, matches.length - 1); navigated = true; event.accepted = true; return
       }
-      if (listOpen && plain && event.key === Qt.Key_Up) {
+      if (listOpen && ((plain && event.key === Qt.Key_Up) || (ctrl && event.key === Qt.Key_K))) {
         highlight = Math.max(highlight - 1, 0); navigated = true; event.accepted = true; return
       }
       if (event.key === Qt.Key_Escape && text !== "") {
@@ -676,7 +828,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: timeField
-    contentWidth: panel.fittedContentWidth(Style.space(440))
+    contentWidth: panel.fittedContentWidth(Style.space(480))
     contentHeight: panel.fittedContentHeight(content.implicitHeight, Style.space(680))
 
     Column {
@@ -807,17 +959,109 @@ Panel {
         id: noteField
         visible: !root.settingsOpen
         width: parent.width
+        // Above the separator and timeline, so the history list paints over
+        // them the way the picker dropdowns do.
+        z: 9
         foreground: root.fg
         accent: Color.accent
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
-        placeholderText: "note — Enter books · Ctrl+Enter tracker"
+        placeholderText: root.historyOpen
+          ? "search past descriptions…"
+          : "note — Enter books · Ctrl+R history"
 
+        // History must see Tab and Enter before the form's own walk does.
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
+          if (root.handleHistoryKey(event)) { event.accepted = true; return }
           if (event.key === Qt.Key_Tab) { timeField.forceActiveFocus(); event.accepted = true; return }
           if (event.key === Qt.Key_Backtab) { serviceField.forceActiveFocus(); event.accepted = true; return }
           event.accepted = root.handleGlobalKey(event)
+        }
+
+        onActiveFocusChanged: if (!activeFocus) root.closeHistory(true)
+
+        Rectangle {
+          visible: root.historyOpen
+          y: noteField.height + Style.space(2)
+          width: noteField.width
+          height: historyColumn.implicitHeight + Style.space(8)
+          z: 100
+          radius: Style.cornerRadius
+          color: Color.popups.background
+          border.width: Style.normalBorderWidth
+          border.color: Color.popups.border
+
+          Column {
+            id: historyColumn
+            anchors.fill: parent
+            anchors.margins: Style.space(4)
+
+            Text {
+              width: parent.width
+              leftPadding: Style.space(8)
+              bottomPadding: Style.space(2)
+              textFormat: Text.PlainText
+              elide: Text.ElideRight
+              text: root.historyMatches.length > 0
+                ? "Ctrl+R next · ⏎ takes description, project and service · Esc cancels"
+                : root.history.length === 0 ? "no history yet" : "no match"
+              color: Qt.darker(Color.popups.text, 1.6)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            Repeater {
+              model: root.historyMatches
+
+              Rectangle {
+                required property var modelData
+                required property int index
+                width: parent.width
+                height: Style.spacing.popupRowHeight
+                radius: Style.cornerRadius
+                color: index === root.historyIndex
+                  ? Style.selectedFillFor(root.fg, Color.accent)
+                  : "transparent"
+
+                Text {
+                  id: historyMeta
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.space(8)
+                  textFormat: Text.PlainText
+                  text: Qt.formatDate(Model.parseDateKey(modelData.date), "d MMM")
+                    + (modelData.count > 1 ? "  ×" + modelData.count : "")
+                  color: Qt.darker(Color.popups.text, 1.6)
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.space(8)
+                  anchors.right: historyMeta.left
+                  anchors.rightMargin: Style.space(8)
+                  textFormat: Text.PlainText
+                  elide: Text.ElideRight
+                  text: modelData.label
+                    + (modelData.project_name ? "  ·  " + modelData.project_name : "")
+                  color: Color.popups.text
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  onClicked: {
+                    root.historyIndex = index
+                    root.acceptHistory()
+                  }
+                }
+              }
+            }
+          }
         }
       }
 
@@ -881,9 +1125,71 @@ Panel {
 
       // ---- Day timeline. Positioned by the note prefix; overlaps side by
       //      side in urgent; entries without clock times hang below, dimmed.
+      // ---- Chord sheet, in place of the timeline.
+      Column {
+        visible: root.shortcutsOpen && !root.settingsOpen
+        width: parent.width
+        spacing: Style.space(8)
+
+        Repeater {
+          model: root.shortcutGroups
+
+          Column {
+            id: shortcutGroup
+            required property var modelData
+            width: parent.width
+            spacing: Style.space(2)
+
+            SettingsLabel {
+              text: shortcutGroup.modelData.title
+              bottomPadding: Style.space(2)
+            }
+
+            Repeater {
+              model: shortcutGroup.modelData.rows
+
+              Item {
+                id: shortcutRow
+                required property var modelData
+                width: shortcutGroup.width
+                height: shortcutWhat.implicitHeight + Style.space(3)
+
+                Text {
+                  id: shortcutKeys
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(100)
+                  textFormat: Text.PlainText
+                  elide: Text.ElideRight
+                  text: shortcutRow.modelData.keys
+                  color: root.fg
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                }
+
+                Text {
+                  id: shortcutWhat
+                  anchors.left: shortcutKeys.right
+                  anchors.leftMargin: Style.space(8)
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  textFormat: Text.PlainText
+                  elide: Text.ElideRight
+                  text: shortcutRow.modelData.what
+                  color: Qt.darker(root.fg, 1.4)
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+              }
+            }
+          }
+        }
+      }
+
       Item {
         id: timeline
-        visible: !root.settingsOpen
+        visible: !root.settingsOpen && !root.shortcutsOpen
         readonly property int fromMinutes: root.dayLayout.fromMinutes
         readonly property int toMinutes: root.dayLayout.toMinutes
         readonly property real pxPerMinute: root.pxPerMinute
@@ -1011,14 +1317,15 @@ Panel {
         width: parent.width
         height: Math.max(totalText.implicitHeight, settingsButton.height)
 
-        Text {
-          textFormat: Text.PlainText
+        PanelActionButton {
           anchors.left: parent.left
+          anchors.leftMargin: -Style.space(6)
           anchors.verticalCenter: parent.verticalCenter
-          text: "Ctrl: ←/→ day · ↓/↑ select · E edit · D del ×2 · ⏎ tracker"
-          color: Qt.darker(root.fg, 1.9)
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          iconText: "\u{f030c}"
+          tooltipText: "Keyboard shortcuts (Ctrl+/)"
+          foreground: root.shortcutsOpen ? Color.accent : Qt.darker(root.fg, 1.9)
+          fontFamily: root.fontFamily
+          onClicked: root.toggleShortcuts()
         }
 
         Text {

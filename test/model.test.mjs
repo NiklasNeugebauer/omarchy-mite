@@ -54,6 +54,59 @@ test("fuzzy", () => {
   const hits = M.fuzzyFilter(items, "o", (p) => p.name)
   assert.equal(hits[0].name, "Order Portal")
   assert.deepEqual(M.fuzzyFilter(items, "", (p) => p.name), items, "empty query keeps order")
+  assert.ok(M.fuzzyScore("nordwnd", "Nordwind") >= 0, "subsequence within a word")
+  assert.ok(M.fuzzyScore("nord", "Nordwind") > M.fuzzyScore("nord", "Hafennordseite"),
+    "word start beats a hit in the middle")
+})
+
+test("fuzzy across fields and query words", () => {
+  const projects = [
+    { name: "Bildanalyse", customer_name: "Nordwind 4711" },
+    { name: "Wartung", customer_name: "Nordwind 4711" },
+    { name: "Nordlicht", customer_name: "Sonstiges 10" },
+    { name: "Website Relaunch", customer_name: null },
+  ]
+  const of = (p) => [p.name, p.customer_name]
+  const names = (q) => M.fuzzyFilter(projects, q, of).map((p) => p.name)
+
+  assert.deepEqual(names("nordwind"),
+    ["Bildanalyse", "Wartung"], "the customer finds its projects")
+  assert.deepEqual(names("nord bild"), ["Bildanalyse"], "words match different fields")
+  assert.deepEqual(names("bild nord"), ["Bildanalyse"], "word order does not matter")
+  assert.deepEqual(names("nordwnd"), ["Bildanalyse", "Wartung"])
+  assert.equal(names("nord")[0], "Nordlicht", "the project name outranks the customer")
+  assert.deepEqual(names("relaunch"), ["Website Relaunch"], "an absent customer is no obstacle")
+  assert.deepEqual(names("nordwind xyz"), [], "every word must match")
+})
+
+test("historyFrom collapses repeats, most recent first", () => {
+  const entries = [
+    { date_at: "2026-09-16", note: "(9:00 bis 9:15) Standup", project_id: 1, project_name: "Bildanalyse", service_id: 7, service_name: "Dev" },
+    { date_at: "2026-09-15", note: "(9:00 bis 9:15) standup", project_id: 1, project_name: "Bildanalyse", service_id: 7, service_name: "Dev" },
+    { date_at: "2026-09-14", note: "(9:00 bis 9:15) Standup", project_id: 2, project_name: "Wartung", service_id: 7, service_name: "Dev" },
+    { date_at: "2026-09-13", note: "(10:00 bis 11:00) ", project_id: 1, project_name: "Bildanalyse", service_id: 7, service_name: "Dev" },
+    { date_at: "2026-09-12", note: "No clock time", project_id: 1, project_name: "Bildanalyse", service_id: 7, service_name: "Dev" },
+    { date_at: "2026-09-11", note: "(14:00 bis 14:30) (13:54 bis 13:54)", project_id: 1, project_name: "Bildanalyse", service_id: 7, service_name: "Dev" },
+  ]
+  const history = M.historyFrom(entries)
+  assert.deepEqual(history.map((h) => h.label), ["Standup", "Standup", "No clock time"],
+    "the note prefix is stripped — twice over where needed — and a description that is all clock drops out")
+  assert.equal(history[0].count, 2, "same description, project and service collapse")
+  assert.equal(history[0].date, "2026-09-16")
+  assert.equal(history[0].project_name, "Bildanalyse")
+  assert.equal(history[1].project_name, "Wartung", "another project is another entry")
+
+  const hits = M.fuzzyFilter(history, "stand wart", (h) => [h.label, h.project_name])
+  assert.deepEqual(hits.map((h) => h.project_name), ["Wartung"], "the history searches both")
+})
+
+test("parseDateKey reads a day key in local time", () => {
+  const d = M.parseDateKey("2026-09-16")
+  assert.equal(d.getFullYear(), 2026)
+  assert.equal(d.getMonth(), 8)
+  assert.equal(d.getDate(), 16)
+  assert.equal(M.dateKey(d), "2026-09-16", "round-trips through dateKey")
+  assert.equal(M.parseDateKey(""), null)
 })
 
 test("layoutDay positions, overlaps, appends untimed", () => {

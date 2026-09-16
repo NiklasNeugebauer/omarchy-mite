@@ -92,6 +92,17 @@ function fetchDay(cfg, dateKey, callback) {
     function(err, data) { callback(err, err ? null : unwrap(data, "time_entry")) })
 }
 
+/**
+ * The current user's entries between two "YYYY-MM-DD" days, newest first —
+ * the raw material for the description history. mite caps a page at 1000,
+ * which a quarter of one person's bookings stays well under.
+ */
+function fetchEntryRange(cfg, fromKey, toKey, callback) {
+  request(cfg, "GET", "/time_entries.json?from=" + fromKey + "&to=" + toKey
+      + "&limit=1000&sort=date&direction=desc", null,
+    function(err, data) { callback(err, err ? null : unwrap(data, "time_entry")) })
+}
+
 /** Active (non-archived) projects and services, newest first as mite returns them. */
 function fetchProjects(cfg, callback) {
   request(cfg, "GET", "/projects.json", null,
