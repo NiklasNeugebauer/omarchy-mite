@@ -37,6 +37,10 @@ test("note prefix round-trip", () => {
   assert.deepEqual(M.parseNoteRange("(10:15 bis 12:05) review"), { start: 615, end: 725, label: "review" })
   assert.equal(M.parseNoteRange("no prefix here"), null)
   assert.equal(M.parseNoteRange("(12:05 bis 10:15) backwards"), null)
+  // mite's web timer writes a zero-length prefix when started and stopped
+  // within the same minute; rejecting it turns the entry "untimed" and makes
+  // editing leak the prefix into the label.
+  assert.deepEqual(M.parseNoteRange("(13:51 bis 13:51)"), { start: 831, end: 831, label: "" })
   assert.equal(M.parseNoteRange(null), null)
   assert.equal(M.ensurePrefix("(9:00 bis 9:30) kept", 600, 660), "(9:00 bis 9:30) kept")
   assert.equal(M.ensurePrefix("added", 600, 660), "(10:00 bis 11:00) added")

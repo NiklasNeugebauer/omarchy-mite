@@ -6,9 +6,33 @@
 // API reference: https://mite.de/api/ — auth via the X-MiteApiKey header,
 // base URL https://<account>.mite.de. Qt's XHR forbids a custom User-Agent,
 // so requests go out with the Qt default.
+//
+// Qt's XHR `timeout` is not trusted here: on a stalled connection (packets
+// dropped, wifi gone mid-request) Qt 6.11 fires no event at all — not
+// ontimeout, not DONE — no matter when the timeout is set. A request that
+// never calls back wedges the panel's busy flag shut forever. So every
+// request registers a deadline instead, and the panel ticks reapStale(),
+// which aborts overdue requests; abort() reliably fires DONE with status 0.
+
+var TIMEOUT_MS = 10000
+
+/** In-flight requests: {xhr, deadline, timedOut, finished}. */
+var pending = []
 
 function baseUrl(cfg) {
   return "https://" + cfg.account + ".mite.de"
+}
+
+/** Abort every in-flight request past its deadline. `now` defaults to Date.now(). */
+function reapStale(now) {
+  if (now === undefined) now = Date.now()
+  // abort() calls back synchronously and finish() splices `pending`, so
+  // walk a snapshot.
+  var stale = pending.filter(function(p) { return now >= p.deadline })
+  for (var i = 0; i < stale.length; i++) {
+    stale[i].timedOut = true
+    stale[i].xhr.abort()
+  }
 }
 
 function request(cfg, method, path, body, callback) {
@@ -17,31 +41,40 @@ function request(cfg, method, path, body, callback) {
     return
   }
   var xhr = new XMLHttpRequest()
+  var entry = { xhr: xhr, deadline: Date.now() + TIMEOUT_MS, timedOut: false, finished: false }
+  function finish(err, data) {
+    if (entry.finished) return
+    entry.finished = true
+    var idx = pending.indexOf(entry)
+    if (idx !== -1) pending.splice(idx, 1)
+    callback(err, data)
+  }
   xhr.open(method, baseUrl(cfg) + path)
-  xhr.timeout = 10000
-  xhr.ontimeout = function() { callback("mite did not answer within 10s", null) }
   xhr.setRequestHeader("X-MiteApiKey", cfg.apiKey)
   xhr.setRequestHeader("Accept", "application/json")
   if (body !== null) xhr.setRequestHeader("Content-Type", "application/json")
   xhr.onreadystatechange = function() {
     if (xhr.readyState !== XMLHttpRequest.DONE) return
-    if (xhr.status === 0) {
-      callback("mite unreachable (offline?)", null)
+    if (entry.timedOut) {
+      finish("mite did not answer within " + TIMEOUT_MS / 1000 + "s", null)
+    } else if (xhr.status === 0) {
+      finish("mite unreachable (offline?)", null)
     } else if (xhr.status === 401) {
-      callback("mite rejected the API key", null)
+      finish("mite rejected the API key", null)
     } else if (xhr.status < 200 || xhr.status >= 300) {
       var detail = ""
       try { detail = JSON.parse(xhr.responseText).error || "" } catch (e) {}
-      callback("mite error " + xhr.status + (detail ? ": " + detail : ""), null)
+      finish("mite error " + xhr.status + (detail ? ": " + detail : ""), null)
     } else {
       var data = null
       try { data = xhr.responseText ? JSON.parse(xhr.responseText) : {} } catch (e) {
-        callback("mite sent unparsable JSON", null)
+        finish("mite sent unparsable JSON", null)
         return
       }
-      callback(null, data)
+      finish(null, data)
     }
   }
+  pending.push(entry)
   xhr.send(body === null ? undefined : JSON.stringify(body))
 }
 
@@ -99,4 +132,16 @@ function startTracker(cfg, entryId, callback) {
 
 function stopTracker(cfg, entryId, callback) {
   request(cfg, "DELETE", "/tracker/" + entryId + ".json", null, callback)
+}
+
+// QML's `import "Mite.js" as Mite` sees the top-level functions directly;
+// node (which runs the tests against a fake XMLHttpRequest) needs them
+// exported, and defines `module` where QML's JS environment does not.
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    TIMEOUT_MS: TIMEOUT_MS,
+    pending: pending,
+    reapStale: reapStale,
+    request: request,
+  }
 }

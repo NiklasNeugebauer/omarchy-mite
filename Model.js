@@ -77,7 +77,9 @@ function parseNoteRange(note) {
   if (h1 > 23 || h2 > 23 || min1 > 59 || min2 > 59) return null
   var start = h1 * 60 + min1
   var end = h2 * 60 + min2
-  if (end <= start) return null
+  // end == start is real data: mite's web timer writes a zero-length prefix
+  // when started and stopped within the same minute.
+  if (end < start) return null
   return { start: start, end: end, label: text.slice(m[0].length) }
 }
 

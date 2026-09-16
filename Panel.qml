@@ -43,6 +43,9 @@ Panel {
   readonly property bool viewingToday: viewKey === todayKey
   property string error: ""
   property bool busy: false
+  // The last background poll failed: the bar dims and stops trusting its
+  // stale data until a fetch succeeds again.
+  property bool unreachable: false
 
   // The time span a minimum-height block covers on screen, so the layout can
   // split lanes for entries that collide only visually.
@@ -99,8 +102,9 @@ Panel {
   function refreshToday() {
     if (!root.configured) return
     Mite.fetchDay(root.miteConfig, root.todayKey, function(err, entries) {
-      if (err) { root.error = err; return }
+      if (err) { root.error = err; root.unreachable = true; return }
       root.error = ""
+      root.unreachable = false
       root.todayEntries = entries
       if (root.viewingToday) root.viewEntries = entries
     })
@@ -450,6 +454,17 @@ Panel {
     onTriggered: { root.now = new Date(); root.refreshToday() }
   }
 
+  // Qt's XHR timeout never fires on a stalled connection (verified: no event
+  // at all), so requests carry their own deadline in Mite.js; this tick
+  // aborts overdue ones and keeps `busy` from wedging shut when the network
+  // drops mid-request.
+  Timer {
+    interval: 2000
+    running: root.configured
+    repeat: true
+    onTriggered: Mite.reapStale()
+  }
+
   SystemClock {
     precision: SystemClock.Minutes
     onDateChanged: {
@@ -467,13 +482,15 @@ Panel {
     text: root.vertical || root.todayTotal === 0
       ? "\u{f051b}"
       : "\u{f051b} " + Model.formatClock(root.todayTotal)
-    active: root.configured && !root.activeNow
-    dimmed: !root.configured
+    active: root.configured && !root.unreachable && !root.activeNow
+    dimmed: !root.configured || root.unreachable
     tooltipText: !root.configured
       ? "mite: set account and apiKey in shell.json"
-      : root.activeNow
-        ? (root.trackingEntry ? "Tracking since " + trackingSince() : "Booked over the current time")
-        : "Nothing booked right now"
+      : root.unreachable
+        ? "mite unreachable — showing the last fetched data"
+        : root.activeNow
+          ? (root.trackingEntry ? "Tracking since " + trackingSince() : "Booked over the current time")
+          : "Nothing booked right now"
     onPressed: root.toggle()
   }
 
@@ -845,14 +862,17 @@ Panel {
         }
       }
 
-      // ---- Error / hint line.
+      // ---- Error / hint line. While a request is in flight it says so, so
+      //      Enter on a bad connection never looks like a dead key.
       Text {
         visible: text !== ""
         width: parent.width
         wrapMode: Text.Wrap
         textFormat: Text.PlainText
-        text: root.configured ? root.error : "Set \"account\" and \"apiKey\" on this widget's entry in shell.json"
-        color: root.urgent
+        text: !root.configured
+          ? "Set \"account\" and \"apiKey\" on this widget's entry in shell.json"
+          : root.busy ? "waiting for mite…" : root.error
+        color: root.configured && root.busy ? Qt.darker(root.fg, 1.3) : root.urgent
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall
       }
