@@ -1,12 +1,14 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 import "Mite.js" as Mite
 
-// mite time tracking on the bar: the button shows today's booked hours and
-// turns urgent-red while nothing covers the current time; the popup books
+// mite time tracking on the bar: the button shows today's booked hours,
+// turns urgent-red while nothing covers the current time and yellow while
+// the tracker runs; the popup books
 // entries with a few keystrokes and lays the day out on a timeline.
 //
 // Speed is the point. The panel opens focused on the time field; Tab walks
@@ -26,6 +28,11 @@ Panel {
   readonly property bool configured: miteConfig.account !== "" && miteConfig.apiKey !== ""
   readonly property int refreshMinutes: Math.max(1, parseInt(setting("refreshMinutes", 1), 10) || 1)
   readonly property int historyDays: Math.max(1, parseInt(setting("historyDays", 90), 10) || 90)
+  // The running tracker's color on the bar. The shell palette has no yellow
+  // role, so it comes from the theme's colors.toml, unless shell.json says
+  // otherwise ("trackingColor").
+  property string themeYellow: ""
+  readonly property color trackingColor: String(setting("trackingColor", "")) || themeYellow || "#e5c07b"
 
   // ---- Clock. nowMinutes drives the red state, the tracker slot, and the
   //      now-line, so a minute tick keeps all three honest.
@@ -625,8 +632,17 @@ Panel {
     }
   }
 
+  FileView {
+    path: Quickshell.env("HOME") + "/.local/state/omarchy/current/theme/colors.toml"
+    printErrors: false
+    onLoaded: {
+      var m = text().match(/^\s*yellow\s*=\s*["']?(#[0-9A-Fa-f]{6})/m)
+      root.themeYellow = m ? m[1] : ""
+    }
+  }
+
   // ---- The bar button: timer glyph plus today's total, urgent-red while
-  //      no entry covers the current time.
+  //      no entry covers the current time, yellow while the tracker runs.
   WidgetButton {
     id: button
     anchors.fill: parent
@@ -634,7 +650,8 @@ Panel {
     text: root.vertical || root.todayTotal === 0
       ? "\u{f051b}"
       : "\u{f051b} " + Model.formatClock(root.todayTotal)
-    active: root.configured && !root.unreachable && !root.activeNow
+    active: root.configured && !root.unreachable && (!root.activeNow || root.trackingEntry !== null)
+    activeColor: root.trackingEntry ? root.trackingColor : (root.bar ? root.bar.urgent : Color.urgent)
     dimmed: !root.configured || root.unreachable
     tooltipText: !root.configured
       ? "mite: set account and apiKey in shell.json"

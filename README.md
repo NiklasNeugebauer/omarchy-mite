@@ -96,7 +96,8 @@ the last timed entry, dimmed. Chords work from any field:
 The bar widget polls mite once a minute (`refreshMinutes` in shell.json).
 Today's total includes a running tracker, counted locally from its start
 time, so it ticks up on the minute without waiting for the next poll. Red
-glyph: no tracker running and no entry prefix covering now.
+glyph: no tracker running and no entry prefix covering now. Yellow glyph: the
+tracker runs (the theme's `yellow`; `trackingColor` in shell.json overrides).
 
 ## Develop
 
