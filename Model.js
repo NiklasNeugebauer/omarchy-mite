@@ -383,9 +383,26 @@ function layoutDay(entries, nowMinutes, minSlotMinutes) {
 
 // ---- Totals and the bar state.
 
-function totalMinutes(entries) {
+/**
+ * Minutes an entry stands for at `nowMs`. mite keeps a running tracker's
+ * time out of the entry's `minutes` until the tracker stops (it reports it
+ * separately, floored to whole minutes), so a tracked entry counts the time
+ * since `tracking.since` on top — locally, so the total moves between polls.
+ */
+function entryMinutes(entry, nowMs) {
+  var minutes = entry.minutes || 0
+  if (entry.tracking && entry.tracking.since) {
+    var since = new Date(entry.tracking.since).getTime()
+    if (!isNaN(since)) minutes += Math.max(0, Math.floor((nowMs - since) / 60000))
+  }
+  return minutes
+}
+
+/** @param now  Date or ms; defaults to the current time. */
+function totalMinutes(entries, now) {
+  var nowMs = now === undefined ? Date.now() : Number(now)
   var total = 0
-  for (var i = 0; i < entries.length; i++) total += entries[i].minutes || 0
+  for (var i = 0; i < entries.length; i++) total += entryMinutes(entries[i], nowMs)
   return total
 }
 
@@ -435,6 +452,7 @@ if (typeof module !== "undefined" && module.exports) {
     historyFrom: historyFrom,
     parseDateKey: parseDateKey,
     layoutDay: layoutDay,
+    entryMinutes: entryMinutes,
     totalMinutes: totalMinutes,
     isActive: isActive,
     dateKey: dateKey,

@@ -54,7 +54,7 @@ Panel {
   readonly property int minSlotMinutes: Math.ceil(Style.space(14) / pxPerMinute)
   readonly property var dayLayout: Model.layoutDay(viewEntries, nowMinutes, minSlotMinutes)
   readonly property bool activeNow: Model.isActive(todayEntries, nowMinutes)
-  readonly property int todayTotal: Model.totalMinutes(todayEntries)
+  readonly property int todayTotal: Model.totalMinutes(todayEntries, now)
   readonly property var trackingEntry: {
     for (var i = 0; i < todayEntries.length; i++)
       if (todayEntries[i].tracking) return todayEntries[i]
@@ -613,11 +613,15 @@ Panel {
     onTriggered: Mite.reapStale()
   }
 
+  // Seconds while the tracker runs, so the bar's total flips the moment the
+  // running entry completes a minute; a minute tick is all anything else
+  // needs, and the fetch below stays on the minute either way.
   SystemClock {
-    precision: SystemClock.Minutes
+    precision: root.trackingEntry ? SystemClock.Seconds : SystemClock.Minutes
     onDateChanged: {
+      var minuteChanged = Model.minutesNow(date) !== root.nowMinutes || Model.dateKey(date) !== root.todayKey
       root.now = date
-      if (root.opened && root.viewingToday) root.refreshView()
+      if (minuteChanged && root.opened && root.viewingToday) root.refreshView()
     }
   }
 
@@ -1334,7 +1338,7 @@ Panel {
           anchors.right: settingsButton.left
           anchors.rightMargin: Style.space(6)
           anchors.verticalCenter: parent.verticalCenter
-          text: Model.formatClock(Model.totalMinutes(root.viewEntries)) + " h"
+          text: Model.formatClock(Model.totalMinutes(root.viewEntries, root.now)) + " h"
           color: root.fg
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall

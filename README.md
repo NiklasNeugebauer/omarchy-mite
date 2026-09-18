@@ -93,9 +93,10 @@ the last timed entry, dimmed. Chords work from any field:
 | `Ctrl+/` | the shortcut list (also the ⌨ bottom left) |
 | `Esc` | clear query / edit / selection, then close |
 
-The bar widget polls mite once a minute. Red glyph: no tracker running and no
-entry prefix covering now. While the tracker runs, the label shows the
-running entry's elapsed time alongside today's total.
+The bar widget polls mite once a minute (`refreshMinutes` in shell.json).
+Today's total includes a running tracker, counted locally from its start
+time, so it ticks up on the minute without waiting for the next poll. Red
+glyph: no tracker running and no entry prefix covering now.
 
 ## Develop
 

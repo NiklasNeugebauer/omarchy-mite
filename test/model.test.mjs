@@ -177,6 +177,14 @@ test("toDigits round-trips through parseTimeToken", () => {
 
 test("totals and dates", () => {
   assert.equal(M.totalMinutes([{ minutes: 30 }, { minutes: 75 }]), 105)
+  // mite reports a tracked entry's minutes without the running time; the
+  // total adds it from `since`, floored to whole minutes like mite does.
+  const since = new Date(2026, 8, 18, 14, 52, 46)
+  const tracked = { minutes: 30, tracking: { since: since.toISOString() } }
+  assert.equal(M.totalMinutes([{ minutes: 10 }, tracked], new Date(2026, 8, 18, 14, 57, 18)), 44)
+  assert.equal(M.totalMinutes([tracked], since), 30)
+  assert.equal(M.entryMinutes(tracked, since.getTime() - 5000), 30, "clock skew never subtracts")
+  assert.equal(M.entryMinutes({ minutes: 5, tracking: { since: "garbage" } }, Date.now()), 5)
   assert.equal(M.formatClock(405), "6:45")
   assert.equal(M.dateKey(new Date(2026, 8, 3)), "2026-09-03")
   assert.equal(M.dateKey(M.addDays(new Date(2026, 8, 1), -1)), "2026-08-31")
