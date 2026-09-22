@@ -44,7 +44,7 @@ o.bind("SUPER + CTRL + M", "mite", "omarchy-shell shell toggle niklasneugebauer.
 ## Use
 
 The form is built for speed: it opens focused on the **time field**, `Tab`
-walks time → project → service → note, `Enter` books from anywhere.
+walks time → note → project → service, `Enter` books from anywhere.
 
 - Time field, bare digits, no colons: `930 1215` books 9:30–12:15 (also
   `930-1215`), `930` books from 9:30 until now.

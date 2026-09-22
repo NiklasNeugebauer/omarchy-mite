@@ -12,7 +12,7 @@ import "Mite.js" as Mite
 // entries with a few keystrokes and lays the day out on a timeline.
 //
 // Speed is the point. The panel opens focused on the time field; Tab walks
-// time → project → service → note; Enter books from anywhere. Times are bare
+// time → note → project → service; Enter books from anywhere. Times are bare
 // digits ("930 1215"), projects and services filter fuzzily while you type,
 // and after booking the project snaps back to the configured default.
 Panel {
@@ -104,7 +104,7 @@ Panel {
   property bool shortcutsOpen: false
   readonly property var shortcutGroups: [
     { title: "FORM", rows: [
-      { keys: "Tab / Shift+Tab", what: "walk time → project → service → note" },
+      { keys: "Tab / Shift+Tab", what: "walk time → note → project → service" },
       { keys: "Enter", what: "book, or save the entry being edited" },
       { keys: "Ctrl+Enter", what: "start / stop the tracker" },
       { keys: "Ctrl+R", what: "search past descriptions" },
@@ -951,8 +951,8 @@ Panel {
 
           Keys.priority: Keys.BeforeItem
           Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_Tab) { projectField.forceActiveFocus(); event.accepted = true; return }
-            if (event.key === Qt.Key_Backtab) { noteField.forceActiveFocus(); event.accepted = true; return }
+            if (event.key === Qt.Key_Tab) { noteField.forceActiveFocus(); event.accepted = true; return }
+            if (event.key === Qt.Key_Backtab) { serviceField.forceActiveFocus(); event.accepted = true; return }
             event.accepted = root.handleGlobalKey(event)
           }
         }
@@ -963,7 +963,7 @@ Panel {
           items: root.projects
           emptyLabel: "project"
           nextField: serviceField
-          previousField: timeField
+          previousField: noteField
         }
 
         FuzzyField {
@@ -971,7 +971,7 @@ Panel {
           width: Style.space(120)
           items: root.services
           emptyLabel: "service"
-          nextField: noteField
+          nextField: timeField
           previousField: projectField
         }
       }
@@ -995,8 +995,8 @@ Panel {
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
           if (root.handleHistoryKey(event)) { event.accepted = true; return }
-          if (event.key === Qt.Key_Tab) { timeField.forceActiveFocus(); event.accepted = true; return }
-          if (event.key === Qt.Key_Backtab) { serviceField.forceActiveFocus(); event.accepted = true; return }
+          if (event.key === Qt.Key_Tab) { projectField.forceActiveFocus(); event.accepted = true; return }
+          if (event.key === Qt.Key_Backtab) { timeField.forceActiveFocus(); event.accepted = true; return }
           event.accepted = root.handleGlobalKey(event)
         }
 
